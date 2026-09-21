@@ -1,0 +1,15 @@
+{
+  "platform": "CWLITEARM",
+  "protocol": "SS_VER_1_1",
+  "crypto": "TINYAES128C",
+  "optimization": "s",
+  "upstream_revision": "d5d0188dbdef74e9958348653965b703a1ba4bb7",
+  "compiler": "arm-none-eabi-gcc.EXE (GNU Tools for STM32 13.3.rel1.20240926-1715) 13.3.1 20240614",
+  "artifacts_sha256": {
+    "pfe-aes-CWLITEARM.hex": "761c332429913afa1fb84f3547383006e24801b5c64904e7c818f08cfeb7fe1d",
+    "pfe-aes-CWLITEARM.elf": "e72e89a99a0e15466ba5a628a3c091b636f576eb3ea6d578f2ed11a18db10b3a",
+    "pfe-aes-CWLITEARM.lss": "5ab49cb64660180cdeec6818f61202e73f564a8a439a2f4fbac5d08c8dccb782",
+    "pfe-aes-CWLITEARM.map": "44f038b2b582772a310c2b2440c6e95bace245510043a63f0df6e83b9bfeeacf"
+  },
+  "main_sha256": "4b41a634afe984db5d68824b4a676eac705a0a3e2282722409a3819ab3f9adec"
+}
