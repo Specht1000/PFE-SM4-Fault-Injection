@@ -33,12 +33,15 @@ python -m venv experiments/chipwhisperer_aes/.venv
 # Do not claim hardware validation until this test passes on your connected board.
 
 # 7. Interactive encryption terminal with states recorded on the STM32.
-# Reflash using step 4 first: trace mode requires the new revision 2 firmware.
+# Reflash using step 4 first: software FI requires the new revision 3 firmware.
 .\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py
 
+# Every encryption is followed by decryption on the STM32 and a round-trip check.
 # At the prompt, enter text (UTF-8 + PKCS#7), hex:<raw blocks>, or /quit.
 # Example: Hello STM32!
 # Example: hex:00112233445566778899aabbccddeeff
+# Decrypt raw blocks: decrypt:69c4e0d86a7b0430d8cdb78070b4c55a
+# Decrypt text and remove padding: decrypt-text:<ciphertext hex from a text message>
 
 # Single AES block with all intermediate states and 4x4 matrices:
 .\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --hex 00112233445566778899aabbccddeeff --matrix
@@ -51,6 +54,28 @@ python -m venv experiments/chipwhisperer_aes/.venv
 
 # Normal encryption path: input and ciphertext only, no state snapshots:
 .\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --no-trace
+
+# Decrypt a raw AES block on the STM32 (expected plaintext: 001122...eeff):
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --decrypt 69c4e0d86a7b0430d8cdb78070b4c55a
+
+# For ciphertext produced from text, use --decrypt <hex> --unpad.
+
+# 8. Compare correct AES with a software fault injected inside the STM32.
+# Default: first block, round 9, BEFORE MixColumns, row 0, column 0, XOR 0x01.
+# This modifies an internal byte in firmware; no physical glitch is generated.
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --hex 00112233445566778899aabbccddeeff --fault
+
+# Customize the single transient state fault (indices: row/column 0-3, block 1-based).
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --text 'Hello STM32!' --fault --fault-round 9 --fault-stage MixColumns --fault-row 2 --fault-column 1 --fault-mask 0x55 --matrix
+
+# In the interactive AES terminal, use these commands (not PowerShell commands):
+# /fault on
+# hex:00112233445566778899aabbccddeeff
+# /fault 9 MixColumns 0 0 0x01
+# /fault off
+# Hello STM32!
+# With FI enabled, each encryption message gets one fault in the selected block.
+# Decryption requests never receive a fault; /fault off restores normal encryption.
 
 # OPTIONAL: rebuild after modifying firmware/main.c.
 # The official sources are already present in chipwhisperer.

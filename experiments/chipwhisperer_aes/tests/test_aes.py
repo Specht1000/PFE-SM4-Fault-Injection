@@ -25,6 +25,28 @@ reference_spec.loader.exec_module(reference)
 
 
 class TerminalTests(unittest.TestCase):
+    def test_fault_settings_and_interactive_commands(self):
+        fault = terminal.parse_fault_command('/fault on')
+        self.assertEqual(fault.wire_bytes(), bytes([9, 3, 0, 0, 1]))
+        self.assertIsNone(terminal.parse_fault_command('/fault off', fault))
+        fault = terminal.parse_fault_command('/fault 8 SubBytes 2 1 0x55 2')
+        self.assertEqual(fault.wire_bytes(), bytes([8, 1, 2, 1, 0x55]))
+        self.assertEqual(fault.block, 2)
+        for parameters in ({'round': 0}, {'round': 11}, {'round': 10}, {'mask': 0},
+                           {'mask': 256}, {'row': 4}, {'column': -1}, {'block': 0}, {'stage': 'Input'}):
+            with self.assertRaises(ValueError):
+                terminal.FaultSettings(**parameters)
+
+    def test_fault_block_and_event_validation(self):
+        target = MagicMock()
+        with self.assertRaises(ValueError):
+            terminal.process_fault_message(target, host.PLAINTEXT.hex(), 'hex', host.KEY,
+                                           terminal.FaultSettings(block=2))
+        target.simpleserial_write.assert_not_called()
+        target.simpleserial_read.return_value = bytes(18)
+        target.simpleserial_wait_ack.return_value = 0
+        with self.assertRaises(RuntimeError):
+            terminal.fetch_fault_trace(target, host.PLAINTEXT, terminal.FaultSettings())
     def test_text_padding_and_utf8(self):
         raw, padded = terminal.prepare_input('hello', 'text')
         self.assertEqual(raw, b'hello')
@@ -57,20 +79,47 @@ class TerminalTests(unittest.TestCase):
         expected = AES.new(host.KEY, AES.MODE_ECB).encrypt(padded)
         target = MagicMock()
         target.simpleserial_wait_ack.return_value = 0
-        target.simpleserial_read.side_effect = [expected[i:i + 16] for i in range(0, len(expected), 16)]
+        target.simpleserial_read.side_effect = [block for i in range(0, len(expected), 16)
+                                              for block in (expected[i:i + 16], padded[i:i + 16])]
         with redirect_stdout(io.StringIO()) as output:
             actual = terminal.process_message(target, raw.decode(), 'text', host.KEY, trace=False)
         self.assertEqual(actual, expected)
         self.assertIn(expected.hex(), output.getvalue())
+        self.assertIn('original plaintext: PASS', output.getvalue())
+
+    def test_standalone_decryption_and_unpadding(self):
+        original = b'Hello STM32!'
+        padded = original + bytes([4]) * 4
+        ciphertext = AES.new(host.KEY, AES.MODE_ECB).encrypt(padded)
+        target = MagicMock()
+        target.simpleserial_wait_ack.return_value = 0
+        target.simpleserial_read.return_value = padded
+        with redirect_stdout(io.StringIO()):
+            result = terminal.process_decryption(target, ciphertext.hex(), host.KEY, unpad=True)
+        self.assertEqual(result, original)
+        target.simpleserial_write.assert_called_once_with('d', bytearray(ciphertext))
+
+    def test_reject_invalid_padding(self):
+        for invalid in (b'', bytes(15), bytes(16), bytes([17]) * 16,
+                        b'A' * 14 + bytes([1, 2])):
+            with self.assertRaises(ValueError):
+                terminal.unpad_pkcs7(invalid)
+
+    def test_reject_wrong_decryption_result(self):
+        target = MagicMock()
+        target.simpleserial_wait_ack.return_value = 0
+        target.simpleserial_read.side_effect = [host.CIPHERTEXT, bytes(16)]
+        with redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            terminal.process_message(target, host.PLAINTEXT.hex(), 'hex', host.KEY, trace=False)
 
 
 class ProtocolTests(unittest.TestCase):
     def test_known_answer_and_identity(self):
         target = MagicMock()
-        target.simpleserial_read.side_effect = [host.IDENTITY, host.CIPHERTEXT]
+        target.simpleserial_read.side_effect = [host.IDENTITY, host.CIPHERTEXT, host.PLAINTEXT]
         target.simpleserial_wait_ack.return_value = 0
         host.verify(target)
-        self.assertEqual(target.simpleserial_wait_ack.call_count, 3)
+        self.assertEqual(target.simpleserial_wait_ack.call_count, 4)
 
     def test_missing_and_error_ack(self):
         for status in (None, 1, 2):
@@ -186,11 +235,77 @@ class NativeFirmwareTests(unittest.TestCase):
                 self.assertEqual(terminal.decode_snapshot(packet, index)['state'], expected[index])
             target = MagicMock()
             target.simpleserial_wait_ack.return_value = 0
-            target.simpleserial_read.side_effect = [bytes.fromhex(lines[0])] + packets
+            target.simpleserial_read.side_effect = [bytes.fromhex(lines[0])] + packets + [block]
             with redirect_stdout(io.StringIO()) as output:
                 result = terminal.process_message(target, block.hex(), 'hex', key, matrix=True)
             self.assertEqual(result, AES.new(key, AES.MODE_ECB).encrypt(block))
             self.assertIn('R10 AddRoundKey', output.getvalue())
+
+    def run_fault(self, fault):
+        args = [str(self.binary), host.KEY.hex(), host.PLAINTEXT.hex(), '--fault']
+        args.extend(str(value) for value in fault.wire_bytes())
+        lines = subprocess.check_output(args, text=True).splitlines()
+        clean, faulty, event = (bytes.fromhex(line) for line in lines[:3])
+        packets = [bytes.fromhex(line) for line in lines[3:44]]
+        recovered, clean_again = (bytes.fromhex(line) for line in lines[44:])
+        self.assertEqual(clean, host.CIPHERTEXT)
+        self.assertEqual(clean_again, clean, 'Fault must not persist into later requests')
+        self.assertNotEqual(faulty, clean)
+        self.assertNotEqual(recovered, host.PLAINTEXT)
+        self.assertEqual(recovered, AES.new(host.KEY, AES.MODE_ECB).decrypt(faulty))
+        state = reference.bytes2matrix(host.PLAINTEXT)
+        keys = reference.AES(host.KEY)._key_matrices
+        expected = [host.PLAINTEXT]
+        reference.add_round_key(state, keys[0])
+        expected.append(reference.matrix2bytes(state))
+        operations = {1: reference.sub_bytes, 2: reference.shift_rows, 3: reference.mix_columns}
+        for rnd in range(1, 11):
+            for op in (1, 2, 3, 4):
+                if rnd == 10 and op == 3:
+                    continue
+                if (rnd, op) == tuple(fault.wire_bytes()[:2]):
+                    before = state[fault.column][fault.row]
+                    state[fault.column][fault.row] ^= fault.mask
+                    self.assertEqual(event, bytes([before, before ^ fault.mask]))
+                if op == 4:
+                    reference.add_round_key(state, keys[rnd])
+                else:
+                    operations[op](state)
+                expected.append(reference.matrix2bytes(state))
+        for i, packet in enumerate(packets):
+            self.assertEqual(terminal.decode_snapshot(packet, i)['state'], expected[i])
+        self.assertEqual(faulty, expected[-1])
+        return faulty, event, packets, recovered
+
+    def test_fault_all_positions_and_masks(self):
+        for row in range(4):
+            for column in range(4):
+                for mask in (1, 0x55, 0x80, 0xff):
+                    with self.subTest(row=row, column=column, mask=mask):
+                        faulty, _, _, _ = self.run_fault(terminal.FaultSettings(row=row, column=column, mask=mask))
+                        self.assertEqual(sum(a != b for a, b in zip(faulty, host.CIPHERTEXT)), 4)
+
+    def test_fault_every_valid_round_and_operation(self):
+        for rnd in range(1, 11):
+            for stage in tuple(terminal.OPERATIONS.values())[1:]:
+                if rnd == 10 and stage == 'MixColumns':
+                    continue
+                with self.subTest(round=rnd, stage=stage):
+                    self.run_fault(terminal.FaultSettings(round=rnd, stage=stage))
+
+    def test_fault_terminal_comparison(self):
+        fault = terminal.FaultSettings()
+        faulty, event, packets, recovered = self.run_fault(fault)
+        self.assertEqual(faulty.hex(), '1bc4e0d86a7b04a5d8cd58807083c55a')
+        clean_lines = subprocess.check_output([str(self.binary), host.KEY.hex(), host.PLAINTEXT.hex(), '--trace'], text=True).splitlines()
+        target = MagicMock()
+        target.simpleserial_wait_ack.return_value = 0
+        target.simpleserial_read.side_effect = ([bytes.fromhex(line) for line in clean_lines] +
+                                               [host.PLAINTEXT, faulty + event] + packets + [recovered])
+        with redirect_stdout(io.StringIO()) as output:
+            result = terminal.process_fault_message(target, host.PLAINTEXT.hex(), 'hex', host.KEY, fault)
+        self.assertEqual(result, (host.CIPHERTEXT, faulty, recovered))
+        self.assertIn('MISMATCH (expected', output.getvalue())
 
 
 if __name__ == '__main__':

@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 KEY = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
 PLAINTEXT = bytes.fromhex('00112233445566778899aabbccddeeff')
 CIPHERTEXT = bytes.fromhex('69c4e0d86a7b0430d8cdb78070b4c55a')
-IDENTITY = b'AES\x02'
+IDENTITY = b'AES\x03'
 
 
 def require_ack(target):
@@ -35,7 +35,7 @@ def read_response(target, length):
 def identify(target):
     target.simpleserial_write('i', bytearray())
     identity = read_response(target, 4)
-    if identity not in (b'AES\x01', IDENTITY):
+    if identity not in (b'AES\x01', b'AES\x02', IDENTITY):
         raise RuntimeError('Unexpected firmware identity. Flash the supplied pfe-aes firmware.')
     return identity
 
@@ -50,6 +50,11 @@ def encrypt(target, plaintext):
     return read_response(target, 16)
 
 
+def decrypt(target, ciphertext):
+    target.simpleserial_write('d', bytearray(ciphertext))
+    return read_response(target, 16)
+
+
 def verify(target):
     identity = identify(target)
     set_key(target, KEY)
@@ -57,6 +62,11 @@ def verify(target):
     if actual != CIPHERTEXT:
         raise RuntimeError(f'AES known-answer test failed: {actual.hex()} != {CIPHERTEXT.hex()}')
     print(f'AES-128 known-answer test: PASS ({actual.hex()})')
+    if identity in (b'AES\x02', IDENTITY):
+        recovered = decrypt(target, CIPHERTEXT)
+        if recovered != PLAINTEXT:
+            raise RuntimeError('AES decryption known-answer test failed on the STM32.')
+        print(f'AES-128 decryption test: PASS ({recovered.hex()})')
     return identity
 
 

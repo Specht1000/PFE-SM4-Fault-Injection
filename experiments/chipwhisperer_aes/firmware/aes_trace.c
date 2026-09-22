@@ -33,7 +33,26 @@ static void save_state(uint8_t round, uint8_t operation)
     snapshot_count++;
 }
 
-void trace_encrypt(uint8_t *block)
+static void execute_operation(uint8_t round, uint8_t operation,
+                              const uint8_t *fault, uint8_t *event)
+{
+    if (fault && round == fault[0] && operation == fault[1]) {
+        /* Apply exactly one transient XOR immediately BEFORE the operation. */
+        uint8_t *byte = &(*state)[fault[3]][fault[2]];
+        event[0] = *byte;
+        *byte ^= fault[4];
+        event[1] = *byte;
+    }
+    switch (operation) {
+        case 1: SubBytes(); break;
+        case 2: ShiftRows(); break;
+        case 3: MixColumns(); break;
+        case 4: AddRoundKey(round); break;
+    }
+    save_state(round, operation);
+}
+
+static void encrypt_with_snapshots(uint8_t *block, const uint8_t *fault, uint8_t *event)
 {
     trace_clear();
     state = (state_t *)block;
@@ -41,14 +60,29 @@ void trace_encrypt(uint8_t *block)
     AddRoundKey(0);
     save_state(0, 4);
     for (uint8_t round = 1; round < 10; round++) {
-        SubBytes();     save_state(round, 1);
-        ShiftRows();    save_state(round, 2);
-        MixColumns();   save_state(round, 3);
-        AddRoundKey(round); save_state(round, 4);
+        for (uint8_t operation = 1; operation <= 4; operation++)
+            execute_operation(round, operation, fault, event);
     }
-    SubBytes();      save_state(10, 1);
-    ShiftRows();     save_state(10, 2);
-    AddRoundKey(10); save_state(10, 4);
+    execute_operation(10, 1, fault, event);
+    execute_operation(10, 2, fault, event);
+    execute_operation(10, 4, fault, event);
+}
+
+void trace_encrypt(uint8_t *block)
+{
+    encrypt_with_snapshots(block, NULL, NULL);
+}
+
+uint8_t trace_encrypt_fault(uint8_t *block, const uint8_t *parameters, uint8_t *event)
+{
+    trace_clear();
+    if (parameters[0] < 1 || parameters[0] > 10 ||
+        parameters[1] < 1 || parameters[1] > 4 ||
+        (parameters[0] == 10 && parameters[1] == 3) ||
+        parameters[2] > 3 || parameters[3] > 3 || parameters[4] == 0)
+        return 5;
+    encrypt_with_snapshots(block, parameters, event);
+    return 0;
 }
 
 uint8_t trace_read(uint8_t index, uint8_t *packet)
@@ -57,4 +91,12 @@ uint8_t trace_read(uint8_t index, uint8_t *packet)
     if (index >= AES_TRACE_STEPS) return 4;
     memcpy(packet, snapshots[index], AES_TRACE_PACKET_SIZE);
     return 0;
+}
+
+void target_decrypt(uint8_t *block)
+{
+    trace_clear();
+    state = (state_t *)block;
+    /* Use the expanded key, not a pointer into a previous UART request. */
+    InvCipher();
 }

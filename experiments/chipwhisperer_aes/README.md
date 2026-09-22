@@ -13,10 +13,13 @@ All source code, comments, output, and documentation are in English.
 - Capture board: retains its own USB/control firmware. The `flash` command
   programs the STM32 target application through its UART bootloader.
 
-This is the baseline for future physical fault injection experiments. It performs
-normal AES encryption; no simulated fault, software XOR injection, or glitch
-campaign is included. Both voltage glitch outputs are disabled and the clock
-output is configured without glitches.
+The platform supports AES encryption/decryption, educational state inspection,
+and baseline captures for future fault experiments. Command `p` performs normal
+AES encryption; command `t` records intermediate states; command `f` injects
+one software state fault on the STM32. No physical glitch campaign is included.
+Both voltage glitch outputs are disabled and the clock
+output is configured without glitches. See [TERMINAL.md](TERMINAL.md) for the
+interactive program and decryption verification.
 
 ## First use
 
@@ -42,18 +45,30 @@ and capture settings. Specify `--serial-number` when several capture devices are
 
 | Command | Payload | Response |
 | --- | --- | --- |
-| `i` | Empty | `r` with four bytes: `41 45 53 01` (AES, protocol revision 1) |
+| `i` | Empty | `r` with four bytes: `41 45 53 03` (AES, application revision 3) |
 | `k` | 16 key bytes | Successful acknowledgement after key expansion |
 | `p` | 16 plaintext bytes | `r` with 16 ciphertext bytes, then acknowledgement |
+| `t` | 16 plaintext bytes | Encrypt, record 41 states in RAM, return 16 ciphertext bytes |
+| `s` | One snapshot index, 0–40 | `r` with 19 bytes: index, round, operation ID, state |
+| `d` | 16 ciphertext bytes | `r` with 16 recovered plaintext bytes |
+| `f` | 5 fault parameters + 16 plaintext bytes | `r` with 16 faulty ciphertext bytes + affected byte before/after XOR |
 
 The SimpleSerial library encodes data as hexadecimal ASCII on UART. The Python
 API accepts raw bytes and handles encoding. SimpleSerial V1.1 acknowledgements
 use `z`: status 0 is success, 1 is a callback length error, and 2 means no key has
-been loaded. The parser can discard malformed frames without an acknowledgement.
+been loaded. Status 3 means no saved trace; status 4 means an invalid snapshot
+index. Status 5 means an invalid fault model. The parser can discard malformed
+frames without an acknowledgement.
 
-After reset, a key must be loaded before encryption. The trigger brackets AES
-encryption, with key expansion and UART traffic outside the marked region.
-There is no padding or IV: each request encrypts one raw AES block.
+The fault parameters are round (1–10), operation ID (1–4), row (0–3), column
+(0–3), and nonzero XOR mask (1–255). Round 10/MixColumns is rejected. Command
+`f` applies a single alteration immediately before the selected operation and
+saves the same 41 snapshots as `t`. It never arms a persistent fault. See the
+software FI section in [TERMINAL.md](TERMINAL.md).
+
+After reset, a key must be loaded before encryption/decryption. The trigger
+brackets AES processing, with key expansion and UART traffic outside the marked
+region. Each request processes one raw AES block without padding or an IV.
 
 Known-answer vector:
 
@@ -124,8 +139,11 @@ For the exact dependency revision used for the supplied binary, consult
 
 The ARM firmware has been compiled successfully. The tests exercise the host
 protocol (including errors/timeouts) and compile the actual firmware callbacks
-and AES backend for the host CPU. Native tests cover known-answer vectors and
-32 random key/block pairs compared with PyCryptodome. GPIO and UART are stubbed
+and AES backend for the host CPU. Native tests cover encryption/decryption,
+known-answer vectors, and 32 random key/block pairs compared with PyCryptodome.
+All 41 intermediate states are checked against an independent Python reference.
+Host tests also cover multi-block text, padding, and response validation.
+GPIO and UART are stubbed
 in these tests. Native firmware tests require a host `gcc` compiler.
 
 Physical programming, UART operation, trigger timing, and measured traces still

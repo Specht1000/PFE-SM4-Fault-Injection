@@ -3,6 +3,7 @@
  * Uses the ChipWhisperer HAL, SimpleSerial, and TinyAES backend.
  */
 #include <stdint.h>
+#include <string.h>
 #include "hal.h"
 #include "simpleserial.h"
 #include "aes-independant.h"
@@ -67,12 +68,38 @@ static uint8_t handle_snapshot(uint8_t *data, uint8_t length)
     return 0;
 }
 
+static uint8_t handle_ciphertext(uint8_t *block, uint8_t length)
+{
+    if (length != 16) return 1;
+    if (!key_loaded) return 2;
+    trigger_high();
+    target_decrypt(block);
+    trigger_low();
+    simpleserial_put('r', 16, block);
+    return 0;
+}
+
 static uint8_t handle_identity(uint8_t *data, uint8_t length)
 {
-    uint8_t identity[4] = {'A', 'E', 'S', 2};
+    uint8_t identity[4] = {'A', 'E', 'S', 3};
     (void)data;
     if (length != 0) return 1;
     simpleserial_put('r', sizeof(identity), identity);
+    return 0;
+}
+
+static uint8_t handle_fault(uint8_t *data, uint8_t length)
+{
+    uint8_t response[18], status;
+    if (length != 21) return 1;
+    if (!key_loaded) return 2;
+    /* Request contains its own fault model: nothing remains armed afterward. */
+    trigger_high();
+    status = trace_encrypt_fault(data + 5, data, response + 16);
+    trigger_low();
+    if (status != 0) return status;
+    memcpy(response, data + 5, 16);
+    simpleserial_put('r', sizeof(response), response);
     return 0;
 }
 
@@ -89,5 +116,7 @@ int main(void)
     simpleserial_addcmd('p', 16, handle_plaintext);
     simpleserial_addcmd('t', 16, handle_trace);
     simpleserial_addcmd('s', 1, handle_snapshot);
+    simpleserial_addcmd('d', 16, handle_ciphertext);
+    simpleserial_addcmd('f', 21, handle_fault);
     while (1) simpleserial_get();
 }
