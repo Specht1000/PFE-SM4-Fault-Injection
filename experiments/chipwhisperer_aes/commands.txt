@@ -1,0 +1,52 @@
+# PowerShell commands — ChipWhisperer-Lite with STM32F303 target
+# Run commands one at a time. Stop if a command reports an error.
+# All paths below assume this workspace location.
+
+Set-Location 'C:\Projetos\PFE 5A'
+
+# 1. Create an isolated Python environment (only needed once).
+# Skip this command if experiments/chipwhisperer_aes/.venv already exists.
+python -m venv experiments/chipwhisperer_aes/.venv
+
+# 2. Install the host dependencies (only needed once).
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe -m pip install -r experiments/chipwhisperer_aes/requirements.txt
+
+# 3. Connect the ChipWhisperer-Lite USB cable and test the connection.
+# For a separated target, connect the 20-pin cable as documented by NewAE.
+# For power capture, check the target-to-MEASURE SMA connection for your board.
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_capture.py connect
+
+# 4. Program the STM32F303 with the supplied, already compiled AES firmware.
+# This replaces the TARGET application, not the capture-board firmware.
+# A firmware identity check and AES known-answer test run immediately afterward.
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_capture.py flash
+
+# 5. Verify an already programmed target without programming it again.
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_capture.py verify
+
+# 6. Capture ten baseline power traces with no glitches.
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_capture.py capture --traces 10 --samples 24000
+
+# Expected AES test output:
+# AES-128 known-answer test: PASS (69c4e0d86a7b0430d8cdb78070b4c55a)
+# Captures: experiments/chipwhisperer_aes/results/<UTC timestamp>/
+# Do not claim hardware validation until this test passes on your connected board.
+
+# OPTIONAL: rebuild after modifying firmware/main.c.
+# The official sources are already present in chipwhisperer.
+# build.py also detects third_party/chipwhisperer if that layout is used.
+# Requires arm-none-eabi-gcc, GNU make, and sh/rm (Git for Windows supplies these).
+python experiments/chipwhisperer_aes/build.py
+
+# OPTIONAL: program a different explicitly selected build of this firmware.
+# Replace the path before running:
+# .\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_capture.py flash --firmware 'C:\path\to\pfe-aes-CWLITEARM.hex'
+
+# OPTIONAL: run software tests without a connected board.
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe -m unittest discover -s experiments/chipwhisperer_aes/tests -v
+
+# USB troubleshooting and Windows driver instructions:
+# https://chipwhisperer.readthedocs.io/en/latest/windows-install.html
+# https://chipwhisperer.readthedocs.io/en/latest/drivers.html
+# Target wiring and programming:
+# https://chipwhisperer.readthedocs.io/en/latest/Targets/CW303%20Arm.html

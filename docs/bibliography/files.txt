@@ -2,6 +2,7 @@ https://kudelskisecurity.com/research/practical-fault-attacks-against-sm4
 https://ieeexplore.ieee.org/document/9276502
 https://en.wikipedia.org/wiki/SM4_(cipher)
 
+https://github.com/0x10001/sm4
 https://github.com/guojuntang/sm4_dfa
 https://github.com/boppreh/aes
 https://github.com/newaetech/chipwhisperer-jupyter/blob/main/courses/fault101/Fault%201_1%20-%20Introduction%20to%20Clock%20Glitching.ipynb

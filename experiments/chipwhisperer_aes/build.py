@@ -14,6 +14,13 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
 
+def default_cw_root():
+    for candidate in (ROOT / 'chipwhisperer', ROOT / 'third_party/chipwhisperer'):
+        if (candidate / 'firmware/mcu/Makefile.inc').is_file():
+            return candidate
+    return ROOT / 'chipwhisperer'
+
+
 def find_make(explicit=None):
     if explicit:
         return str(Path(explicit).resolve())
@@ -29,7 +36,7 @@ def find_make(explicit=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--cw-root', type=Path, default=ROOT / 'third_party/chipwhisperer')
+    parser.add_argument('--cw-root', type=Path, default=default_cw_root())
     parser.add_argument('--make', help='Path to GNU make')
     args = parser.parse_args()
     cw_root = args.cw_root.resolve()
@@ -74,7 +81,15 @@ def main():
         src = stage / f'pfe-aes-CWLITEARM.{suffix}'
         shutil.copy2(src, output / src.name)
         artifacts[src.name] = hashlib.sha256(src.read_bytes()).hexdigest()
-    revision = subprocess.check_output(['git', '-C', str(cw_root), 'rev-parse', 'HEAD'], text=True).strip()
+    # A vendored subset has no independent Git history. Do not accidentally
+    # record the enclosing PFE repository's revision as the upstream revision.
+    upstream_file = cw_root / 'UPSTREAM.json'
+    if upstream_file.is_file():
+        revision = json.loads(upstream_file.read_text(encoding='utf-8'))['revision']
+    elif (cw_root / '.git').exists():
+        revision = subprocess.check_output(['git', '-C', str(cw_root), 'rev-parse', 'HEAD'], text=True).strip()
+    else:
+        revision = 'unknown'
     metadata = dict(platform='CWLITEARM', protocol='SS_VER_1_1', crypto='TINYAES128C',
                     optimization='s', upstream_revision=revision,
                     compiler=subprocess.check_output([compiler, '--version'], text=True).splitlines()[0],

@@ -4,3 +4,4 @@ build/*.elf
 build/*.lss
 build/*.map
 build/*.log
+build/*.exe
