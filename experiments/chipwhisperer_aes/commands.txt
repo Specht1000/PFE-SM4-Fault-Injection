@@ -32,6 +32,26 @@ python -m venv experiments/chipwhisperer_aes/.venv
 # Captures: experiments/chipwhisperer_aes/results/<UTC timestamp>/
 # Do not claim hardware validation until this test passes on your connected board.
 
+# 7. Interactive encryption terminal with states recorded on the STM32.
+# Reflash using step 4 first: trace mode requires the new revision 2 firmware.
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py
+
+# At the prompt, enter text (UTF-8 + PKCS#7), hex:<raw blocks>, or /quit.
+# Example: Hello STM32!
+# Example: hex:00112233445566778899aabbccddeeff
+
+# Single AES block with all intermediate states and 4x4 matrices:
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --hex 00112233445566778899aabbccddeeff --matrix
+
+# Text message, automatically padded and split into independent AES blocks:
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --text 'Hello STM32!'
+
+# Pause while displaying each recorded state:
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --text 'Hello STM32!' --step
+
+# Normal encryption path: input and ciphertext only, no state snapshots:
+.\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_terminal.py --no-trace
+
 # OPTIONAL: rebuild after modifying firmware/main.c.
 # The official sources are already present in chipwhisperer.
 # build.py also detects third_party/chipwhisperer if that layout is used.

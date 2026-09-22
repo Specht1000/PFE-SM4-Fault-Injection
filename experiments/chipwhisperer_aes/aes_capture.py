@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 KEY = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
 PLAINTEXT = bytes.fromhex('00112233445566778899aabbccddeeff')
 CIPHERTEXT = bytes.fromhex('69c4e0d86a7b0430d8cdb78070b4c55a')
-IDENTITY = b'AES\x01'
+IDENTITY = b'AES\x02'
 
 
 def require_ack(target):
@@ -34,8 +34,10 @@ def read_response(target, length):
 
 def identify(target):
     target.simpleserial_write('i', bytearray())
-    if read_response(target, 4) != IDENTITY:
+    identity = read_response(target, 4)
+    if identity not in (b'AES\x01', IDENTITY):
         raise RuntimeError('Unexpected firmware identity. Flash the supplied pfe-aes firmware.')
+    return identity
 
 
 def set_key(target, key):
@@ -49,12 +51,13 @@ def encrypt(target, plaintext):
 
 
 def verify(target):
-    identify(target)
+    identity = identify(target)
     set_key(target, KEY)
     actual = encrypt(target, PLAINTEXT)
     if actual != CIPHERTEXT:
         raise RuntimeError(f'AES known-answer test failed: {actual.hex()} != {CIPHERTEXT.hex()}')
     print(f'AES-128 known-answer test: PASS ({actual.hex()})')
+    return identity
 
 
 def capture_one(scope, target, plaintext, expected):
@@ -71,7 +74,7 @@ def capture_one(scope, target, plaintext, expected):
     return ciphertext, wave
 
 
-def capture(scope, target, args, cw_version):
+def capture(scope, target, args, cw_version, identity=IDENTITY):
     import numpy as np
     from Crypto.Cipher import AES
 
@@ -80,7 +83,7 @@ def capture(scope, target, args, cw_version):
     folder = args.output / datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
     folder.mkdir(parents=True, exist_ok=False)
     metadata = dict(created_utc=datetime.now(timezone.utc).isoformat(),
-                    platform='CWLITEARM', firmware_identity=IDENTITY.hex(),
+                    platform='CWLITEARM', firmware_identity=identity.hex(),
                     protocol='SimpleSerial V1.1', chipwhisperer_version=cw_version,
                     key=KEY.hex(), seed=args.seed, requested_traces=args.traces,
                     samples=args.samples, adc_frequency_hz=float(scope.clock.adc_freq),
@@ -159,9 +162,9 @@ def main():
         target = cw.target(scope, cw.targets.SimpleSerial)
         target.baud = 38400
         target.flush()
-        verify(target)
+        identity = verify(target)
         if args.command == 'capture':
-            capture(scope, target, args, cw.__version__)
+            capture(scope, target, args, cw.__version__, identity)
     finally:
         try:
             if target is not None:

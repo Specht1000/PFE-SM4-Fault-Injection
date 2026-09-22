@@ -2,6 +2,9 @@
 import importlib.util
 from pathlib import Path
 import random
+import sys
+import io
+from contextlib import redirect_stdout
 import shutil
 import subprocess
 import unittest
@@ -13,6 +16,52 @@ HERE = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('aes_capture', HERE / 'aes_capture.py')
 host = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(host)
+sys.path.insert(0, str(HERE))
+import aes_terminal as terminal
+reference_spec = importlib.util.spec_from_file_location(
+    'aes_reference', HERE.parents[1] / 'fault_injection/aes_fi_demo/aes_reference.py')
+reference = importlib.util.module_from_spec(reference_spec)
+reference_spec.loader.exec_module(reference)
+
+
+class TerminalTests(unittest.TestCase):
+    def test_text_padding_and_utf8(self):
+        raw, padded = terminal.prepare_input('hello', 'text')
+        self.assertEqual(raw, b'hello')
+        self.assertEqual(padded, b'hello' + bytes([11]) * 11)
+        self.assertEqual(len(terminal.prepare_input('A' * 16, 'text')[1]), 32)
+        self.assertEqual(terminal.prepare_input('', 'text')[1], bytes([16]) * 16)
+        self.assertEqual(terminal.prepare_input('\u00e9', 'text')[0], b'\xc3\xa9')
+
+    def test_raw_hex_and_invalid_input(self):
+        self.assertEqual(terminal.prepare_input(host.PLAINTEXT.hex(), 'hex'),
+                         (host.PLAINTEXT, host.PLAINTEXT))
+        for invalid in ('', 'abc', 'zz' * 16, '00' * 15):
+            with self.assertRaises(ValueError):
+                terminal.prepare_input(invalid, 'hex')
+
+    def test_reject_snapshot_headers_and_endpoints(self):
+        with self.assertRaises(RuntimeError):
+            terminal.decode_snapshot(bytes(18), 0)
+        with self.assertRaises(RuntimeError):
+            terminal.decode_snapshot(bytes([0, 0, 4]) + bytes(16), 0)
+        target = MagicMock()
+        target.simpleserial_wait_ack.return_value = 0
+        packets = [bytes([i, *step]) + bytes(16) for i, step in enumerate(terminal.STEPS)]
+        target.simpleserial_read.side_effect = [host.CIPHERTEXT] + packets
+        with self.assertRaises(RuntimeError):
+            terminal.fetch_trace(target, host.PLAINTEXT)
+
+    def test_multiblock_terminal_uses_target_responses(self):
+        raw, padded = terminal.prepare_input('This message spans several blocks.', 'text')
+        expected = AES.new(host.KEY, AES.MODE_ECB).encrypt(padded)
+        target = MagicMock()
+        target.simpleserial_wait_ack.return_value = 0
+        target.simpleserial_read.side_effect = [expected[i:i + 16] for i in range(0, len(expected), 16)]
+        with redirect_stdout(io.StringIO()) as output:
+            actual = terminal.process_message(target, raw.decode(), 'text', host.KEY, trace=False)
+        self.assertEqual(actual, expected)
+        self.assertIn(expected.hex(), output.getvalue())
 
 
 class ProtocolTests(unittest.TestCase):
@@ -92,6 +141,7 @@ class NativeFirmwareTests(unittest.TestCase):
         command = [compiler, '-std=c99', '-DTINYAES128C', '-I' + str(HERE / 'tests/stubs'),
                    '-I' + str(crypto), '-I' + str(crypto / 'tiny-AES128-C'),
                    str(HERE / 'tests/native_firmware.c'), str(crypto / 'aes-independant.c'),
+                   str(HERE / 'firmware/aes_trace.c'),
                    str(crypto / 'tiny-AES128-C/aes.c'), '-o', str(cls.binary)]
         subprocess.run(command, check=True, capture_output=True, text=True)
 
@@ -111,6 +161,36 @@ class NativeFirmwareTests(unittest.TestCase):
             key = bytes(rng.randrange(256) for _ in range(16))
             block = bytes(rng.randrange(256) for _ in range(16))
             self.check_vector(key, block, AES.new(key, AES.MODE_ECB).encrypt(block))
+
+    def test_all_intermediate_states_and_terminal_transport(self):
+        for key, block in ((host.KEY, host.PLAINTEXT), (bytes(16), bytes(16)),
+                           (bytes(reversed(range(16))), bytes(range(16)))):
+            lines = subprocess.check_output([str(self.binary), key.hex(), block.hex(), '--trace'], text=True).splitlines()
+            packets = [bytes.fromhex(line) for line in lines[1:]]
+            state = reference.bytes2matrix(block)
+            keys = reference.AES(key)._key_matrices
+            expected = [block]
+            reference.add_round_key(state, keys[0])
+            expected.append(reference.matrix2bytes(state))
+            for rnd in range(1, 11):
+                for operation in (reference.sub_bytes, reference.shift_rows):
+                    operation(state)
+                    expected.append(reference.matrix2bytes(state))
+                if rnd < 10:
+                    reference.mix_columns(state)
+                    expected.append(reference.matrix2bytes(state))
+                reference.add_round_key(state, keys[rnd])
+                expected.append(reference.matrix2bytes(state))
+            self.assertEqual(len(packets), 41)
+            for index, packet in enumerate(packets):
+                self.assertEqual(terminal.decode_snapshot(packet, index)['state'], expected[index])
+            target = MagicMock()
+            target.simpleserial_wait_ack.return_value = 0
+            target.simpleserial_read.side_effect = [bytes.fromhex(lines[0])] + packets
+            with redirect_stdout(io.StringIO()) as output:
+                result = terminal.process_message(target, block.hex(), 'hex', key, matrix=True)
+            self.assertEqual(result, AES.new(key, AES.MODE_ECB).encrypt(block))
+            self.assertIn('R10 AddRoundKey', output.getvalue())
 
 
 if __name__ == '__main__':

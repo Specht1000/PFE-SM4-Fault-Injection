@@ -52,7 +52,8 @@ def main():
         parser.error(f'Refusing to overwrite an unowned directory: {stage}')
     stage.mkdir(parents=True, exist_ok=True)
     marker.write_text('Managed by experiments/chipwhisperer_aes/build.py\n', encoding='utf-8')
-    for name in ('main.c', 'Makefile'):
+    source_names = ('main.c', 'aes_trace.c', 'aes_trace.h', 'Makefile')
+    for name in source_names:
         shutil.copy2(HERE / 'firmware' / name, stage / name)
     env = os.environ.copy()
     tool_dirs = [str(Path(make).parent)]
@@ -94,7 +95,9 @@ def main():
                     optimization='s', upstream_revision=revision,
                     compiler=subprocess.check_output([compiler, '--version'], text=True).splitlines()[0],
                     artifacts_sha256=artifacts,
-                    main_sha256=hashlib.sha256((HERE / 'firmware/main.c').read_bytes()).hexdigest())
+                    main_sha256=hashlib.sha256((HERE / 'firmware/main.c').read_bytes()).hexdigest(),
+                    application_sha256={name: hashlib.sha256((HERE / 'firmware' / name).read_bytes()).hexdigest()
+                                        for name in source_names})
     (output / 'build_info.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     print(f'Firmware ready: {output / "pfe-aes-CWLITEARM.hex"}')
 

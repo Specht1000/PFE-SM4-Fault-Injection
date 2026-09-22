@@ -9,7 +9,7 @@
 #undef main
 
 static int trigger_level, rising_edges, falling_edges, response_count;
-static uint8_t response[16], response_length;
+static uint8_t response[AES_TRACE_PACKET_SIZE], response_length;
 void platform_init(void) {}
 void init_uart(void) {}
 void trigger_setup(void) {}
@@ -22,7 +22,7 @@ int simpleserial_addcmd(char command, unsigned int length,
 { (void)command; (void)length; (void)callback; return 0; }
 void simpleserial_put(char command, uint8_t length, uint8_t *data)
 {
-    assert(command == 'r' && length <= 16 && trigger_level == 0);
+    assert(command == 'r' && length <= AES_TRACE_PACKET_SIZE && trigger_level == 0);
     memcpy(response, data, length);
     response_length = length;
     response_count++;
@@ -38,13 +38,17 @@ static void decode(const char *text, uint8_t *bytes)
 }
 int main(int argc, char **argv)
 {
-    uint8_t key[16], block[16];
-    if (argc != 3) return 1;
+    uint8_t key[16], block[16], plaintext[16], ciphertext[16], index;
+    if (argc != 3 && argc != 4) return 1;
     decode(argv[1], key);
     decode(argv[2], block);
+    memcpy(plaintext, block, 16);
     aes_indep_init();
     assert(handle_identity(NULL, 0) == 0);
-    assert(response_length == 4 && memcmp(response, "AES\x01", 4) == 0);
+    assert(response_length == 4 && memcmp(response, "AES\x02", 4) == 0);
+    index = 0;
+    assert(handle_snapshot(&index, 1) == 3);
+    assert(handle_trace(block, 16) == 2);
     assert(handle_plaintext(block, 16) == 2);
     assert(rising_edges == 0 && response_count == 1);
     assert(handle_key(key, 15) == 1);
@@ -55,5 +59,26 @@ int main(int argc, char **argv)
     assert(response_count == 2 && response_length == 16);
     for (int i = 0; i < 16; i++) printf("%02x", response[i]);
     puts("");
+    memcpy(ciphertext, response, 16);
+    memcpy(block, plaintext, 16);
+    assert(handle_trace(block, 15) == 1);
+    assert(handle_trace(block, 16) == 0);
+    assert(memcmp(response, ciphertext, 16) == 0);
+    assert(rising_edges == 2 && falling_edges == 2);
+    assert(handle_snapshot(&index, 0) == 1);
+    for (index = 0; index < AES_TRACE_STEPS; index++) {
+        assert(handle_snapshot(&index, 1) == 0);
+        assert(response_length == AES_TRACE_PACKET_SIZE && response[0] == index);
+        if (index == 0) assert(memcmp(response + 3, plaintext, 16) == 0);
+        if (index == 40) assert(memcmp(response + 3, ciphertext, 16) == 0);
+        if (argc == 4) {
+            for (int i = 0; i < AES_TRACE_PACKET_SIZE; i++) printf("%02x", response[i]);
+            puts("");
+        }
+    }
+    assert(handle_snapshot(&index, 1) == 4);
+    assert(handle_key(key, 16) == 0);
+    index = 0;
+    assert(handle_snapshot(&index, 1) == 3);
     return 0;
 }

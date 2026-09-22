@@ -6,10 +6,16 @@
   "upstream_revision": "d5d0188dbdef74e9958348653965b703a1ba4bb7",
   "compiler": "arm-none-eabi-gcc.EXE (GNU Tools for STM32 13.3.rel1.20240926-1715) 13.3.1 20240614",
   "artifacts_sha256": {
-    "pfe-aes-CWLITEARM.hex": "761c332429913afa1fb84f3547383006e24801b5c64904e7c818f08cfeb7fe1d",
-    "pfe-aes-CWLITEARM.elf": "4b1896707ce68966bc3f1b1163fe56bc54fbf97b381b42fa4245c96c04fa99a0",
-    "pfe-aes-CWLITEARM.lss": "90fe5a3c50eb73aaa34b009be0100470e5a64a6a04255cf9713ea79c13aeae85",
-    "pfe-aes-CWLITEARM.map": "85e9dc28d01e76d830dc73b9e22cdab805b4a578cb3d8ab550611749460e4faf"
+    "pfe-aes-CWLITEARM.hex": "f5e6fd39a6eec14b71fe5bc65a455101e47a83adf9717c628c4dc5e2d4c95016",
+    "pfe-aes-CWLITEARM.elf": "2b41a4eaf029e2c5447e45ef025b4eb993cb36958f049a6cc12d4198e2504c8e",
+    "pfe-aes-CWLITEARM.lss": "aa0be932a8704bf5ea47115c66e1d7fa36b0f6df6c6e579c7e992f66b13138db",
+    "pfe-aes-CWLITEARM.map": "603777ea1323d3fc953c4767888fec7ed97e0a031348ba6f319cd0956b321e01"
   },
-  "main_sha256": "4b41a634afe984db5d68824b4a676eac705a0a3e2282722409a3819ab3f9adec"
+  "main_sha256": "c2ed9f82b5b35c3f887f95511e203f707970360597a319a6947bf58ae116f0bf",
+  "application_sha256": {
+    "main.c": "c2ed9f82b5b35c3f887f95511e203f707970360597a319a6947bf58ae116f0bf",
+    "aes_trace.c": "92fbb502d562015bc8defceb87c8a0129cc8796c1429e7e5288687cf7596c0b3",
+    "aes_trace.h": "9d1dc065d3521a277948b1a272fa3d8420aed4a9553fbc25c7d031b195a06395",
+    "Makefile": "0a4ae2fd8cb1c7df62d27e1721a270abcd930885191aae3fc51e3d559882dfd1"
+  }
 }
