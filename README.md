@@ -10,6 +10,11 @@ toward SM4.
   connect and program the board.
 - [Python FI demonstration](fault_injection/aes_fi_demo/README.md): simulated AES
   fault propagation with an offline HTML visualization.
+- [Giraud fault attack](docs/giraud-attack/README.md): differential fault
+  analysis that recovers the AES key from single-bit last-round faults
+  ([implementation](fault_injection/giraud_attack/giraud.py)).
+- [Analysis notebook](analysis/README.md): a Jupyter notebook tying together AES
+  correctness, diffusion, fault propagation, the Giraud attack, and power traces.
 - [Presentations](docs/presentations/) and [bibliography](docs/bibliography/).
 
 The [ChipWhisperer subset](chipwhisperer/PFE_SUBSET.md) includes only the firmware
