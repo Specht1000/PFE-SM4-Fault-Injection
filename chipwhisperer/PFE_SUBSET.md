@@ -24,7 +24,7 @@ Build from the project root:
 python experiments/chipwhisperer_aes/build.py
 ```
 
-See `experiments/chipwhisperer_aes/commands.txt` for programming and capture.
+See `experiments/chipwhisperer_aes/COMMANDS.md` for programming and capture.
 This subset supports the current CWLITEARM / TINYAES128C / SS_VER_1_1 build.
 Other configurations may require explicitly adding further upstream files to
 the allowlist and updating the manifest.

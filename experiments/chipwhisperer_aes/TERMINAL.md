@@ -9,7 +9,7 @@ There is no simulation fallback when hardware is absent.
 Run from the workspace root. Reflash the updated firmware first: this terminal
 supports normal operation with revision 2 or 3; software fault injection requires
 revision 3 (`AES\x03`). All use SimpleSerial V1.1.
-The updated HEX file is already compiled. All commands are also in `commands.txt`.
+The updated HEX file is already compiled. All commands are also in [COMMANDS.md](COMMANDS.md).
 
 ```powershell
 .\experiments\chipwhisperer_aes\.venv\Scripts\python.exe experiments/chipwhisperer_aes/aes_capture.py flash

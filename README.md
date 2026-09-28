@@ -6,7 +6,7 @@ toward SM4.
 
 - [Hardware AES experiment](experiments/chipwhisperer_aes/README.md): firmware,
   compilation, programming, known-answer verification, and baseline power capture.
-- [PowerShell commands](experiments/chipwhisperer_aes/commands.txt): start here to
+- [PowerShell commands](experiments/chipwhisperer_aes/COMMANDS.md): start here to
   connect and program the board.
 - [Python FI demonstration](fault_injection/aes_fi_demo/README.md): simulated AES
   fault propagation with an offline HTML visualization.

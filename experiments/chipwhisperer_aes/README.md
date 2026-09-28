@@ -1,7 +1,7 @@
 # AES-128 firmware and host tools for ChipWhisperer-Lite / STM32F303
 
 The compiled target firmware is `build/pfe-aes-CWLITEARM.hex`.
-Copy and run the PowerShell commands in **commands.txt** one at a time.
+Copy and run the PowerShell commands in [COMMANDS.md](COMMANDS.md) one at a time.
 All source code, comments, output, and documentation are in English.
 
 ## What runs where
@@ -10,6 +10,9 @@ All source code, comments, output, and documentation are in English.
   SimpleSerial V1.1, and TinyAES-128-C backend.
 - Computer: `aes_capture.py` connects through the ChipWhisperer Python API,
   programs the target, checks AES results, and records baseline power traces.
+  `aes_terminal.py` is the text console for encryption, decryption, and fault
+  injection; `gui_server.py` (see `gui/`) is a local browser GUI for the same
+  operations, with the AES state shown as a steppable 4x4 matrix.
 - Capture board: retains its own USB/control firmware. The `flash` command
   programs the STM32 target application through its UART bootloader.
 
@@ -24,7 +27,7 @@ interactive program and decryption verification.
 ## First use
 
 The project uses an isolated environment at `experiments/chipwhisperer_aes/.venv`.
-Install dependencies there as shown in `commands.txt`; no Jupyter or CubeIDE GUI
+Install dependencies there as shown in [COMMANDS.md](COMMANDS.md); no Jupyter or CubeIDE GUI
 is needed to flash the supplied HEX file. This environment is separate from the
 workspace's existing `.venv` because ChipWhisperer 6.0 requires NumPy below 2.
 
