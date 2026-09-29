@@ -1,0 +1,46 @@
+# PowerShell commands. Run sections individually from the repository root.
+# Code runs on STM32F303; ChipWhisperer-Lite supplies clock, UART and programming.
+
+# 1. Create an isolated host environment (Python 3.11).
+python -m venv experiments/chipwhisperer_sm4/.venv
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe -m pip install -r experiments/chipwhisperer_sm4/requirements.txt
+
+# 2. Build. Requires arm-none-eabi-gcc, GNU make, and Git for Windows on PATH.
+# Skip this if using the supplied HEX without changing the firmware sources.
+python experiments/chipwhisperer_sm4/build.py
+
+# 3. Connect ChipWhisperer-Lite USB with its STM32F303 target attached.
+# Close the AES GUI, other terminals and notebooks using the same USB device.
+# This command replaces the AES application on the STM32 with the SM4 application.
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/sm4_capture.py flash
+
+# 4. Verify encryption and decryption on the actual target.
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/sm4_capture.py verify
+
+# 5. Start the GUI, then open http://127.0.0.1:8766 in a browser.
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/gui_server.py
+# Stop with Ctrl+C before using another host script.
+
+# 6. Alternative: interactive terminal.
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/sm4_terminal.py
+# Prompt examples:
+# hex:0123456789abcdeffedcba9876543210
+# decrypt:681edf34d206965e86b3e94f536e4246
+# text:Hello from STM32!
+# /fault 31 1 0 0x01
+# fault:0123456789abcdeffedcba9876543210
+# /quit
+
+# 7. One-shot encryption, decryption, and software FI.
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/sm4_terminal.py --value 0123456789abcdeffedcba9876543210
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/sm4_terminal.py --operation decrypt --value 681edf34d206965e86b3e94f536e4246
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/sm4_terminal.py --operation fault --fault 31 1 0 0x01 --value 0123456789abcdeffedcba9876543210
+
+# 8. Capture baseline ADC traces; files go to the experiment's results directory.
+experiments/chipwhisperer_sm4/.venv/Scripts/python.exe experiments/chipwhisperer_sm4/sm4_capture.py capture --traces 10 --samples 24000
+
+# 9. Offline regression tests. Requires native GCC; OpenSSL enables oracle tests.
+python experiments/chipwhisperer_sm4/tests/test_sm4.py
+
+# Optional: restore AES using the existing AES host environment and HEX.
+experiments/chipwhisperer_aes/.venv/Scripts/python.exe experiments/chipwhisperer_aes/aes_capture.py flash

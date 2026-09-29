@@ -2,6 +2,7 @@
 
 The compiled target firmware is `build/pfe-aes-CWLITEARM.hex`.
 Copy and run the PowerShell commands in [COMMANDS.md](COMMANDS.md) one at a time.
+See [FILES.md](FILES.md) for what each file does and how the GUI connects them.
 All source code, comments, output, and documentation are in English.
 
 ## What runs where

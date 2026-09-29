@@ -1,0 +1,22 @@
+{
+  "platform": "CWLITEARM",
+  "protocol": "SS_VER_1_1",
+  "crypto": "NONE",
+  "optimization": "s",
+  "upstream_revision": "d5d0188dbdef74e9958348653965b703a1ba4bb7",
+  "compiler": "arm-none-eabi-gcc.EXE (GNU Tools for STM32 13.3.rel1.20240926-1715) 13.3.1 20240614",
+  "artifacts_sha256": {
+    "pfe-sm4-CWLITEARM.hex": "fe01728addc577d0bb512d8006f6f703b64ca7768a6d9bd6c219eaa0731ef6b5",
+    "pfe-sm4-CWLITEARM.elf": "c3421fa9ebbb86ed249112a0bf0339e892a6ac5a8370c0c44e24f0df5dec9dad",
+    "pfe-sm4-CWLITEARM.lss": "53ed0c1bee920bfac0bfa2cf302f26a77959cc8e56f4937b31664b8721e7ceef",
+    "pfe-sm4-CWLITEARM.map": "5e549d1df01eeb43a235357fec923672820225a63c90b8c11069d385662e60e6"
+  },
+  "main_sha256": "c14cba9de98ee5f62a8ca705d5aa15516c6a4accd94726659a2d47af6bb899a6",
+  "application_sha256": {
+    "main.c": "c14cba9de98ee5f62a8ca705d5aa15516c6a4accd94726659a2d47af6bb899a6",
+    "sm4.c": "a655b876b54468bec50f6c354b638a4728ce670b2503e81c539ccfec07792f1b",
+    "sm4.h": "b1b4fdefc0f420276d1e45aa32946a4223e4f9e9f5d195a29d1bccbf7274bfb6",
+    "sbox.inc": "52416bd040273bc47144965f430d4564386914fd9ac93e6987035002490691ec",
+    "Makefile": "3b6c0eafdc2e17b207c8ac52143df2b0f00bcb93404f97c53af19322f0a29021"
+  }
+}

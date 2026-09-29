@@ -32,15 +32,21 @@ PLAINTEXT = bytes.fromhex('00112233445566778899aabbccddeeff')
 
 
 def popcount(value):
+    """Number of 1 bits in a byte (the Hamming weight)."""
     return bin(value).count('1')
 
 
 def encrypt(key, plaintext):
+    """Fault-free AES-128 encryption of one 16-byte block."""
     return aes.AES(key).encrypt_block(plaintext)
 
 
 def fault_ciphertext(key, plaintext, row, column, mask):
-    """Ciphertext when one byte is XORed with `mask` just before round-10 SubBytes."""
+    """Ciphertext when one byte is XORed with `mask` just before round-10 SubBytes.
+
+    This is the Giraud fault model, produced here with the software fault
+    injector from ../aes_fi_demo (the same model as the STM32 'f' command).
+    """
     fault = demo.Fault(round=10, stage='SubBytes', row=row, column=column, mask=mask)
     ciphertext, _ = demo.encrypt_trace(key, plaintext, fault)
     return ciphertext
@@ -56,9 +62,12 @@ def candidate_key_bytes(correct, faulty, position):
     implied fault flips exactly one bit.
     """
     keep = set()
-    for k in range(256):
-        a = aes.inv_s_box[correct[position] ^ k]
-        a_faulty = aes.inv_s_box[faulty[position] ^ k]
+    for k in range(256):                       # try every possible key byte 0..255
+        # Undo AddRoundKey and SubBytes for this key guess, on both ciphertexts.
+        a = aes.inv_s_box[correct[position] ^ k]        # value that entered SubBytes (correct run)
+        a_faulty = aes.inv_s_box[faulty[position] ^ k]  # value that entered SubBytes (faulty run)
+        # a XOR a_faulty is the fault this key guess implies. The real fault was
+        # a single bit, so keep only guesses whose implied fault has weight 1.
         if popcount(a ^ a_faulty) == 1:
             keep.add(k)
     return keep
@@ -66,27 +75,32 @@ def candidate_key_bytes(correct, faulty, position):
 
 def recover_last_round_key(key, plaintext, verbose=False):
     """Recover the 16 bytes of the round-10 key using single-bit faults."""
-    correct = encrypt(key, plaintext)
+    correct = encrypt(key, plaintext)          # the one fault-free reference ciphertext
     recovered = [None] * 16
+    # Fault each of the 16 state bytes at the input of the last round in turn.
     for column in range(4):
         for row in range(4):
             # Intersect the candidate sets from faults on different bits until
             # a single key byte survives. Its output position follows ShiftRows.
-            surviving = None
-            output_position = None
-            for bit in range(8):
+            surviving = None                   # running intersection of key-byte candidates
+            output_position = None             # which ciphertext byte this input byte reaches
+            for bit in range(8):               # inject a fault on each bit 0..7 in turn
                 faulty = fault_ciphertext(key, plaintext, row, column, 1 << bit)
+                # A single-bit fault before the last SubBytes must change exactly
+                # one output byte (SubBytes/ShiftRows/AddRoundKey are byte-local).
                 diff = [i for i in range(16) if correct[i] != faulty[i]]
                 if len(diff) != 1:
                     raise RuntimeError('A last-round bit fault must change exactly one output byte.')
                 position = diff[0]
+                # Every fault on this input byte must land on the same output byte.
                 if output_position is None:
                     output_position = position
                 elif position != output_position:
                     raise RuntimeError('Faults on one input byte reached different output bytes.')
+                # Narrow the key-byte candidates; the true byte survives every fault.
                 candidates = candidate_key_bytes(correct, faulty, position)
                 surviving = candidates if surviving is None else (surviving & candidates)
-                if len(surviving) == 1:
+                if len(surviving) == 1:        # unique key byte found, stop early
                     break
             if not surviving or len(surviving) != 1:
                 raise RuntimeError(f'Could not isolate key byte at output {output_position} '
@@ -101,23 +115,33 @@ def recover_last_round_key(key, plaintext, verbose=False):
 
 
 def invert_key_schedule(last_round_key):
-    """Invert the AES-128 key schedule: round-10 key -> 16-byte master key."""
-    words = [None] * 44
+    """Invert the AES-128 key schedule: round-10 key -> 16-byte master key.
+
+    The key schedule expands the 4 master-key words (w0..w3) into 44 words; the
+    last four (w40..w43) form round key 10. Each step is reversible, so knowing
+    w40..w43 we walk backwards to w0..w3 and reassemble the original key.
+    """
+    words = [None] * 44                        # w0..w43, each a 4-byte list
+    # Seed the last four words from the recovered round-10 key.
     for column in range(4):
         words[40 + column] = list(last_round_key[4 * column:4 * column + 4])
+    # Undo the expansion from w43 back to w4 (forward: w[i] = w[i-4] XOR f(w[i-1])).
     for index in range(43, 3, -1):
         previous = words[index - 1]
         if index % 4 == 0:
-            rotated = previous[1:] + previous[:1]
-            temp = [aes.s_box[b] for b in rotated]
-            temp[0] ^= aes.r_con[index // 4]
+            # Start of a group: the forward step applied RotWord, SubWord, Rcon.
+            rotated = previous[1:] + previous[:1]         # RotWord: rotate left by 1
+            temp = [aes.s_box[b] for b in rotated]        # SubWord: S-box each byte
+            temp[0] ^= aes.r_con[index // 4]              # XOR the round constant
         else:
-            temp = previous
+            temp = previous                                # other words: plain XOR
         words[index - 4] = [a ^ b for a, b in zip(words[index], temp)]
+    # w0..w3 are the master key, in order.
     return bytes(sum((words[i] for i in range(4)), []))
 
 
 def run(key, plaintext, verbose=False):
+    """Full attack: recover K10 from faults, invert it to the master key, verify."""
     correct = encrypt(key, plaintext)
     print(f'Plaintext:         {plaintext.hex()}')
     print(f'Correct ciphertext:{correct.hex()}')

@@ -1,6 +1,19 @@
 """AES-128 with transient fault injection and an educational visualization.
 
 Python 3.9+, standard library only. Internal state: state[column][row].
+
+WHAT THIS SCRIPT DOES
+---------------------
+It is the software twin of the STM32 fault command ('f' in the firmware). It
+encrypts a block twice with the pure-Python AES in aes_reference.py: once
+correctly, and once while flipping the bits of a single chosen state byte, at a
+single chosen step. It records every intermediate state of both runs, compares
+them, and writes an interactive HTML page (and a JSON dump) that lets you step
+through how the injected difference spreads round by round.
+
+This models the *logical effect* of a fault (a controlled XOR on one byte). It
+does not drive any glitching hardware, and it stops at propagation: recovering
+the key from the faulty output is a separate step (see ../giraud_attack).
 """
 import argparse
 from dataclasses import dataclass
@@ -10,14 +23,18 @@ from pathlib import Path
 
 import aes_reference as aes
 
+# Public FIPS 197 example values, used so results are reproducible and checkable.
 KEY = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
 PLAINTEXT = bytes.fromhex('00112233445566778899aabbccddeeff')
-EXPECTED = bytes.fromhex('69c4e0d86a7b0430d8cdb78070b4c55a')
+EXPECTED = bytes.fromhex('69c4e0d86a7b0430d8cdb78070b4c55a')  # AES(KEY, PLAINTEXT)
+# The four AES round operations, in the order they run within a round.
 STAGES = ('SubBytes', 'ShiftRows', 'MixColumns', 'AddRoundKey')
 
 
 @dataclass(frozen=True)
 class Fault:
+    """Describes one transient fault: XOR `mask` into state byte (row, column)
+    immediately before operation `stage` of round `round`."""
     round: int = 9
     stage: str = 'MixColumns'
     row: int = 0
@@ -25,6 +42,7 @@ class Fault:
     mask: int = 1
 
     def __post_init__(self):
+        # Validate the fault model up front so bad parameters fail clearly.
         if not 1 <= self.round <= 10:
             raise ValueError('Round must be between 1 and 10.')
         if self.stage not in STAGES:
@@ -38,47 +56,70 @@ class Fault:
 
 
 def encrypt_trace(key, plaintext, fault=None):
-    """Inject once, BEFORE the selected operation; record state snapshots."""
+    """Encrypt one block, recording the state after every operation.
+
+    Runs the AES-128 schedule manually (initial AddRoundKey, nine full rounds,
+    then a final round without MixColumns) so each step can be snapshotted. If
+    `fault` is given, the single XOR is applied once, BEFORE the selected
+    operation. Returns (ciphertext, trace) where trace is a list of
+    {'label', 'state'} dicts, one per recorded step.
+    """
     if len(key) != 16 or len(plaintext) != 16:
         raise ValueError('This demo requires a key and block of exactly 16 bytes each.')
-    cipher = aes.AES(key)
-    state = aes.bytes2matrix(plaintext)
+    cipher = aes.AES(key)                     # expands the key into round keys
+    state = aes.bytes2matrix(plaintext)       # 4x4 matrix, indexed [column][row]
     trace = []
 
     def record(label):
+        # Snapshot a flat 16-byte copy of the current state, with a label.
         trace.append({'label': label, 'state': list(aes.matrix2bytes(state))})
 
-    record('Input')
-    aes.add_round_key(state, cipher._key_matrices[0])
+    record('Input')                           # the plaintext, before any round
+    aes.add_round_key(state, cipher._key_matrices[0])   # round-0 key whitening
     record('R00 after AddRoundKey')
-    for rnd in range(1, 11):
+    for rnd in range(1, 11):                   # rounds 1..10
         for stage in STAGES:
             if rnd == 10 and stage == 'MixColumns':
-                continue
+                continue                       # the last round has no MixColumns
             if fault and (rnd, stage) == (fault.round, fault.stage):
                 # Perturb the data without modifying the key or instructions.
+                # This is the "fault": one byte is XORed with the mask.
                 state[fault.column][fault.row] ^= fault.mask
             record(f'R{rnd:02d} before {stage}')
+            # Dispatch to the matching AES operation from aes_reference.
             if stage == 'AddRoundKey':
                 aes.add_round_key(state, cipher._key_matrices[rnd])
             else:
                 {'SubBytes': aes.sub_bytes, 'ShiftRows': aes.shift_rows,
                  'MixColumns': aes.mix_columns}[stage](state)
             record(f'R{rnd:02d} after {stage}')
-    return aes.matrix2bytes(state), trace
+    return aes.matrix2bytes(state), trace       # ciphertext + full trace
 
 
 def compare(clean_trace, faulty_trace):
+    """Line up the two traces step by step and measure the difference.
+
+    For each recorded step returns the clean state, the faulty state, their
+    byte-wise XOR (`delta`), how many bytes differ, and the Hamming distance in
+    bits. This is what the visualization animates to show the fault spreading.
+    """
     result = []
     for a, b in zip(clean_trace, faulty_trace):
-        delta = [x ^ y for x, y in zip(a['state'], b['state'])]
+        delta = [x ^ y for x, y in zip(a['state'], b['state'])]   # XOR difference
         result.append(dict(label=a['label'], clean=a['state'], faulty=b['state'],
-                           delta=delta, bytes_changed=sum(x != 0 for x in delta),
-                           bits_changed=sum(bin(x).count('1') for x in delta)))
+                           delta=delta,
+                           bytes_changed=sum(x != 0 for x in delta),        # 0..16
+                           bits_changed=sum(bin(x).count('1') for x in delta)))  # 0..128
     return result
 
 
 def write_html(path, steps, fault, clean, faulty):
+    """Render the step-by-step comparison as a self-contained HTML page.
+
+    The page embeds the `steps` data as JSON and a small script that draws the
+    clean state, faulty state, and their XOR as three 4x4 grids you can page
+    through. It is offline (no server, no dependencies) — open it in a browser.
+    """
     title = (f'Round {fault.round}, before {fault.stage}, '
              f'row {fault.row}, column {fault.column}, XOR 0x{fault.mask:02x}')
     page = '''<!doctype html><html lang="en"><meta charset="utf-8">
@@ -136,6 +177,7 @@ show(first);
 
 
 def main():
+    # Command-line options select the fault; defaults reproduce the README demo.
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--round', type=int, default=9, help='Round 1–10 (default: 9)')
     parser.add_argument('--stage', choices=STAGES, default='MixColumns', help='Inject BEFORE this operation')
@@ -148,9 +190,11 @@ def main():
         fault = Fault(args.round, args.stage, args.row, args.column, args.mask)
     except ValueError as exc:
         parser.error(str(exc))
+    # Reference (fault-free) run, checked against the known-answer vector.
     clean, a = encrypt_trace(KEY, PLAINTEXT)
     if clean != EXPECTED:
         raise RuntimeError('AES validation failed against the FIPS 197 known-answer vector.')
+    # Faulty run with the requested injection, then diff the two.
     faulty, b = encrypt_trace(KEY, PLAINTEXT, fault)
     steps = compare(a, b)
     print('AES-128 | Transient XOR fault injection | Software simulation')
