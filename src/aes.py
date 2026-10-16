@@ -2,17 +2,7 @@
 # ============================================================
 # AES-128 - DIDACTIC IMPLEMENTATION
 # PFE 5A - Polytech Montpellier / STMicroelectronics
-#
-# Educational implementation:
-# - AES-128 encryption
-# - Key expansion
-# - SubBytes
-# - ShiftRows
-# - MixColumns
-# - AddRoundKey
-# - State visualization after each operation
-#
-# Run: python aes.py
+# Guilherme Martins Specht
 # ============================================================
 
 # ============================================================
