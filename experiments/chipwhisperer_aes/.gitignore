@@ -1,7 +1,0 @@
-__pycache__/
-results/
-build/*.elf
-build/*.lss
-build/*.map
-build/*.log
-build/*.exe

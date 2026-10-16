@@ -90,11 +90,7 @@ def print_state(state, title):
     print("-" * 35)
 
     for row in range(4):
-        print(
-            "   " +
-            "  ".join(f"{state[row][col]:02X}"
-                      for col in range(4))
-        )
+        print("   " + "  ".join(f"{state[row][col]:02X}" for col in range(4)))
 
 
 def print_separator(round_number):
@@ -119,11 +115,7 @@ def bytes_to_state(data):
 
 
 def state_to_bytes(state):
-    return bytes(
-        state[row][col]
-        for col in range(4)
-        for row in range(4)
-    )
+    return bytes(state[row][col] for col in range(4) for row in range(4))
 
 
 # ============================================================
@@ -148,9 +140,7 @@ def sub_bytes(state):
 
 def shift_rows(state):
     for row in range(1, 4):
-        state[row] = (
-            state[row][row:] + state[row][:row]
-        )
+        state[row] = (state[row][row:] + state[row][:row])
 
 
 # ============================================================
@@ -207,10 +197,7 @@ def mix_columns(state):
             value = 0
 
             for k in range(4):
-                value ^= gf_mul(
-                    MIX_MATRIX[row][k],
-                    original[k]
-                )
+                value ^= gf_mul(MIX_MATRIX[row][k], original[k])
 
             result[row] = value
 
@@ -219,15 +206,9 @@ def mix_columns(state):
             print("Input:", [f"{x:02X}" for x in original])
 
             for row in range(4):
-                terms = [
-                    f"{MIX_MATRIX[row][k]:02X}*{original[k]:02X}"
-                    for k in range(4)
-                ]
+                terms = [f"{MIX_MATRIX[row][k]:02X}*{original[k]:02X}" for k in range(4)]
 
-                print(
-                    f"b{row} = {' XOR '.join(terms)}"
-                    f" = {result[row]:02X}"
-                )
+                print(f"b{row} = {' XOR '.join(terms)}" f" = {result[row]:02X}")
 
         for row in range(4):
             state[row][col] = result[row]
@@ -259,10 +240,7 @@ def sub_word(word):
 
 def key_expansion(key):
     # AES-128: 44 words of 4 bytes
-    words = [
-        list(key[4 * i:4 * i + 4])
-        for i in range(4)
-    ]
+    words = [list(key[4 * i:4 * i + 4]) for i in range(4)]
 
     for i in range(4, 44):
         temp = words[i - 1].copy()
@@ -271,10 +249,7 @@ def key_expansion(key):
             temp = sub_word(rot_word(temp))
             temp[0] ^= RCON[i // 4]
 
-        new_word = [
-            words[i - 4][j] ^ temp[j]
-            for j in range(4)
-        ]
+        new_word = [words[i - 4][j] ^ temp[j] for j in range(4)]
 
         words.append(new_word)
 
@@ -284,13 +259,9 @@ def key_expansion(key):
         key_bytes = []
 
         for i in range(4):
-            key_bytes.extend(
-                words[round_number * 4 + i]
-            )
+            key_bytes.extend(words[round_number * 4 + i])
 
-        round_keys.append(
-            bytes_to_state(key_bytes)
-        )
+        round_keys.append(bytes_to_state(key_bytes))
 
     return round_keys
 
@@ -343,15 +314,9 @@ def aes_encrypt(plaintext, key):
         pause()
 
         print("\n[4] ADDROUNDKEY")
-        print_state(
-            round_keys[round_number],
-            f"Round Key {round_number}"
-        )
+        print_state(round_keys[round_number], f"Round Key {round_number}")
 
-        add_round_key(
-            state,
-            round_keys[round_number]
-        )
+        add_round_key(state, round_keys[round_number])
 
         print_state(state, "After AddRoundKey")
         pause()
@@ -415,11 +380,7 @@ def main():
     print("CIPHERTEXT:", ciphertext.hex().upper())
 
     # Official AES-128 known-answer test
-    if (
-        KEY.upper() == "000102030405060708090A0B0C0D0E0F"
-        and PLAINTEXT.upper() ==
-        "00112233445566778899AABBCCDDEEFF"
-    ):
+    if (KEY.upper() == "000102030405060708090A0B0C0D0E0F" and PLAINTEXT.upper() == "00112233445566778899AABBCCDDEEFF"):
         expected = "69C4E0D86A7B0430D8CDB78070B4C55A"
 
         print("\nEXPECTED  :", expected)
