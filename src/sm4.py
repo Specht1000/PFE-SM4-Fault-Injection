@@ -1,6 +1,8 @@
 import struct
 
 N_ROUNDS = 32
+KEY = "0123456789ABCDEFFEDCBA9876543210"
+PLAINTEXT = "0123456789ABCDEFFEDCBA9876543210"
 
 SBOX = (
     0xd6, 0x90, 0xe9, 0xfe, 0xcc, 0xe1, 0x3d, 0xb7, 0x16, 0xb6, 0x14, 0xc2, 0x28, 0xfb, 0x2c, 0x05,
@@ -83,13 +85,14 @@ def sm4_encrypt_block(x: bytes, key: bytes) -> bytes:
 def sm4_decrypt_block(x: bytes, key: bytes) -> bytes:
     return sm4_process_block(x, key, encrypt=False)
 
-plaintext = bytes([0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10])
+if __name__ == "__main__":
+    plaintext = bytes.fromhex(PLAINTEXT)
 
-print(" ".join(map(hex, plaintext)))
-key = plaintext
+    print(" ".join(map(hex, plaintext)))
+    key = bytes.fromhex(KEY)
 
-cyphertext = sm4_encrypt_block(plaintext, key)
+    cyphertext = sm4_encrypt_block(plaintext, key)
 
-print(" ".join(map(hex, cyphertext)))
+    print(" ".join(map(hex, cyphertext)))
 
-print(" ".join(map(hex, sm4_decrypt_block(cyphertext, key))))
+    print(" ".join(map(hex, sm4_decrypt_block(cyphertext, key))))
