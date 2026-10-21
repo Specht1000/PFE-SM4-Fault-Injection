@@ -133,6 +133,31 @@ The default public vectors include:
 
 ## Reading
 
+### MATLAB analysis
+
+```powershell
+matlab -batch "addpath('matlab'); analyze_dfa('Visible',false);"
+```
+
+```matlab
+addpath('matlab'); analyze_dfa
+```
+
+The analysis generates a reproducible 32-trial dataset, checks raw XOR and Hamming
+distances in MATLAB, and prepares fault-propagation plots, affected-byte heatmaps
+and candidate-convergence curves. Figures are saved as PNG, PDF and MATLAB FIG
+files in `matlab/results`, together with statistics, a MAT workspace and a text
+interpretation. MATLAB needs an active license; no extra toolboxes are required.
+The Python exporter requires only the standard library.
+
+These are software simulations with fixed configured keys and varied plaintexts,
+fault masks and locations. Dispersion is reported as one standard deviation.
+AES candidate counts describe 32-bit K10 quartets; SM4 counts describe 8-bit rk31
+bytes. The analysis preserves this distinction and does not rank the ciphers'
+security or infer physical glitch behavior.
+
+### Project references
+
 - [Project explanation: AES and SM4 DFA](docs/AES_SM4_DFA.pdf)
 - [Supporting handwritten notes](docs/AES_SM4_Scratch.pdf)
 - [Supporting AES DFA document](docs/Piret_AES.pdf)

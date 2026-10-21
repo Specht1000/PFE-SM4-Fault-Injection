@@ -1,0 +1,78 @@
+MATLAB DFA ANALYSIS
+
+From the project root, in MATLAB:
+  addpath('matlab'); analyze_dfa
+
+Or from PowerShell:
+  matlab -batch "addpath('matlab'); analyze_dfa('Visible',false);"
+
+Custom campaign:
+  analyze_dfa('Trials',64,'Observations',12,'Seed',42)
+
+Reuse the generated CSV files without rerunning Python:
+  analyze_dfa('GenerateData',false)
+
+Python interpreter override, if MATLAB cannot find python:
+  analyze_dfa('Python','C:\path\to\python.exe')
+
+GENERATED DATA (matlab/results/data)
+
+manifest.json
+  Complete/running marker, seed, counts, fault models, fixed laboratory keys,
+  source hashes and CSV hashes. The default campaign has 32 plaintext trials;
+  each plaintext is used for both ciphers. Trial 1 uses aes.py PLAINTEXT and a
+  one-byte 01 fault at coordinate zero. Other trials vary plaintext and faults.
+  Keys are fixed to the configuration in aes.py and sm4.py.
+
+inputs.csv
+  Per-trial plaintext, AES fault row/column, SM4 S-box-input byte, XOR mask.
+  These coordinates apply to propagation. Recovery processes every group.
+
+propagation.csv
+  One row per trial, cipher and stage: raw clean/faulty hexadecimal scopes,
+  valid_bytes, bytewise XOR delta_00..delta_15, changed bits/bytes.
+  AES uses seven 128-bit stages around its round-9 fault and final round.
+  SM4 uses six stages: before A, injected A, B, L(B), X35, ciphertext.
+  The first five SM4 scopes are 32-bit scalar words; the output is 128 bits.
+  Inactive stored columns are zero padding, shown GRAY in the heatmap.
+  Byte indices are local to the named scope. They do not trace physical byte
+  identity across SM4 intermediates or the final output word reversal.
+
+candidates.csv
+  One row per cipher, trial, group and observation budget, including budget 0.
+  AES groups are four K10 byte quartets, each with an initial count of 2^32.
+  SM4 groups are four rk31 bytes, each with an initial count of 256.
+  evaluated=1: a new faulty ciphertext was queried and intersected.
+  evaluated=0 after success: count 1 is carried forward without another query.
+  Observation 0 is the unconstrained prior, not an observed fault.
+  Mask and raw output observations are retained for reproducibility.
+  AES solver never receives the mask; the SM4 model requires it to be known.
+  true_key_survives is a ground-truth simulation check, not an attacker input.
+
+recovery.csv
+  Whether every group was uniquely identified within the budget, plus the actual
+  number of target fault queries. Ambiguous trials remain in all statistics.
+  AES verifies reversed master key; SM4 verifies rk31 only, without reference keys.
+
+GENERATED ANALYSIS (matlab/results)
+
+01_fault_propagation.png/.pdf/.fig
+  Mean and one sample standard deviation of changed bits and bytes by stage.
+02_affected_byte_heatmaps.png/.pdf/.fig
+  Fraction of trials where each byte differs; gray means outside the active scope.
+03_candidate_convergence.png/.pdf/.fig
+  Mean +/- one SD of log2(candidate count), per group. This is not Shannon entropy.
+propagation_statistics.csv / candidate_statistics.csv
+  Numerical results used in the plots.
+recovery_success_by_budget.csv
+  Fraction of trials with all four groups unique at a given per-group budget.
+analysis.mat / interpretation.txt
+  Reloadable MATLAB results and a plain-language description of scope/limitations.
+
+The campaign is simulated. It includes no physical glitch or ADC acquisition.
+The two fault models and recovered targets differ, so convergence speed and
+Hamming-distance curves cannot establish which cipher is more secure.
+
+Validation on the development machine:
+  Python exporter tests passed. MATLAB Code Analyzer checked script syntax.
+  Runtime figure validation was blocked by an expired local MATLAB license.

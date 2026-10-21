@@ -13,6 +13,24 @@ import piret
 
 
 class PiretTerminalTests(unittest.TestCase):
+    def test_legacy_round9_api_matches_shared_engine(self):
+        key, plaintext = bytes.fromhex(aes.KEY), bytes.fromhex(aes.PLAINTEXT)
+        with patch.object(piret, "FAULT_ROW", 2), patch.object(piret, "FAULT_COL", 3), patch.object(piret, "FAULT_VALUE", 0xA5):
+            correct, clean, keys = piret.encrypt(plaintext, key)
+            faulty, snapshots, _ = piret.encrypt(plaintext, key, inject_fault=True)
+        traced, history = piret.encrypt_with_trace(plaintext, key, 2, 3, 0xA5, fault_round=9)
+        self.assertEqual(faulty, traced)
+        self.assertEqual(correct, piret.aes_target_encrypt(plaintext, key))
+        self.assertEqual(set(snapshots), {"before_fault", "after_fault", "after_mixcolumns", "before_last_subbytes", "ciphertext"})
+        predicted = piret.predicted_mixcolumns_difference(2, 0xA5)
+        difference = piret.difference(clean["after_mixcolumns"], snapshots["after_mixcolumns"])
+        self.assertEqual([difference[r][3] for r in range(4)], predicted)
+        self.assertEqual(piret.reverse_last_round_difference(correct, faulty, keys[10]), piret.difference(clean["before_last_subbytes"], snapshots["before_last_subbytes"]))
+        # An external edit of one legacy snapshot cannot corrupt another or the trace.
+        original = history[-1][2]
+        snapshots["before_fault"][0][0] ^= 1
+        self.assertEqual(aes.state_to_bytes(snapshots["ciphertext"]), original)
+
     def test_recovery_random_keys_all_positions(self):
         rng = random.Random(2003)
         for row in range(4):

@@ -17,6 +17,28 @@ if GUI:
 
 
 class CryptoTests(unittest.TestCase):
+    def test_direct_sm4_block_api_and_reverse_key_display(self):
+        from contextlib import redirect_stdout
+        import io
+        rng = random.Random(32)
+        for _ in range(8):
+            key, block = (bytes(rng.randrange(256) for _ in range(16)) for _ in range(2))
+            with redirect_stdout(io.StringIO()):
+                ciphertext = lab.sm4.sm4_encrypt_block(block, key)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                recovered = lab.sm4.sm4_decrypt_block(ciphertext, key)
+            self.assertEqual(recovered, block)
+            self.assertEqual(ciphertext, lab.sm4_trace(block, key)[0])
+            lines = output.getvalue().splitlines()
+            keys = lab.sm4.key_expansion(key)
+            self.assertIn(f"rk[31] = {keys[31]:08X}", lines[0])
+            self.assertIn(f"rk[0] = {keys[0]:08X}", lines[-1])
+        with self.assertRaises(ValueError):
+            lab.sm4.key_expansion(b"short")
+        with self.assertRaises(ValueError):
+            lab.sm4.sm4_encrypt_block(b"short", bytes(16))
+
     def test_vectors(self):
         for function, key, block, expected in [(lab.aes_trace, lab.AES_KEY, lab.AES_INPUT, "69c4e0d86a7b0430d8cdb78070b4c55a"), (lab.sm4_trace, lab.SM4_VECTOR, lab.SM4_VECTOR, "681edf34d206965e86b3e94f536e4246")]:
             key, block = bytes.fromhex(key), bytes.fromhex(block)

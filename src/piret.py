@@ -1,18 +1,21 @@
+"""Piret-style AES differential fault analysis: simulation, solving and teaching.
 
-# ============================================================
-# PIRET-QUISQUATER-STYLE AES-128 KEY RECOVERY LESSON
-# AES-128 / PFE 5A
-#
-# Requires aes.py in the same directory (src/).
-#
-# Run:
-#     python piret.py
-#
-# Run with --step for pauses, --color always for ANSI colors.
-# The terminal lesson reads aes.py configuration and injects before
-# round-8 MixColumns, then recovers K10 and reverses the key schedule.
-# Legacy round-9 helpers remain available for existing callers.
-# ============================================================
+Author: Guilherme Martins Specht / PFE 5A / Polytech Montpellier.
+
+The target simulator receives a secret key and can expose internal states for a
+teacher view. The attacker functions receive ciphertext observations only.
+Keeping these roles explicit prevents a known-key demonstration from being
+mistaken for a real reconstruction of unknown key bytes.
+
+Fault models: round 8 reaches all four final-round key groups; round 9 reaches
+one group and must be repeated across columns. Both inject a nonzero byte XOR
+immediately before MixColumns. The default CLI uses round 8; run.py follows the
+PDF round-9 model. Existing public helper names remain available to callers.
+
+Read sections 3-6 for the mathematics, then sections 7-9 for terminal output.
+Run: python src/piret.py --step
+"""
+
 
 import argparse
 from contextlib import redirect_stdout
@@ -22,145 +25,75 @@ import os
 import random
 import sys
 import aes
-from aes import (bytes_to_state, state_to_bytes, key_expansion, sub_bytes, shift_rows, mix_columns, add_round_key, SBOX,)
+from aes import bytes_to_state, state_to_bytes, key_expansion, sub_bytes, shift_rows, mix_columns, add_round_key, SBOX
 
-# ============================================================
-# LEGACY ROUND-9 RELATION DEMO CONFIGURATION
-# The main key-recovery lesson reads KEY and PLAINTEXT from aes.py.
-# ============================================================
 
+# ============================================================================
+# 1. CONFIGURATION FOR THE LEGACY KNOWN-KEY DEMONSTRATION
+# ============================================================================
+
+
+# Only relation_demo() uses these legacy example values.
+# main() reads aes.KEY/aes.PLAINTEXT; every simulation engine gets explicit inputs.
 KEY = "000102030405060708090A0B0C0D0E0F"
 PLAINTEXT = "00112233445566778899AABBCCDDEEFF"
-
-# Position of the injected fault in the AES state.
-# Rows and columns range from 0 to 3.
 FAULT_ROW = 0
 FAULT_COL = 0
-
-# Nonzero 8-bit fault mask.
 FAULT_VALUE = 0x01
 
-# ============================================================
-# DISPLAY UTILITIES
-# ============================================================
 
-def show_state(title, state):
-    print("\n" + title)
-    print("-" * 32)
-    for row in state:
-        print(" ".join(f"{byte:02X}" for byte in row))
+# ============================================================================
+# 2. INVERSE S-BOX AND DIFFUSION CONSTANTS
+# ============================================================================
 
 
-def difference(a, b):
-    return [[a[r][c] ^ b[r][c] for c in range(4)] for r in range(4)]
-
-
-def show_difference(title, a, b):
-    show_state(title, difference(a, b))
-
-
-def clone(state):
-    return [row[:] for row in state]
-
-
-# ============================================================
-# AES ENCRYPTION WITH OPTIONAL FAULT
-# ============================================================
-
-def encrypt(plaintext, key, inject_fault=False):
-    state = bytes_to_state(plaintext)
-    round_keys = key_expansion(key)
-
-    snapshots = {}
-
-    # Round 0
-    add_round_key(state, round_keys[0])
-
-    # Rounds 1 through 9
-    for rnd in range(1, 10):
-        sub_bytes(state)
-        shift_rows(state)
-
-        if rnd == 9:
-            snapshots["before_fault"] = clone(state)
-
-            if inject_fault:
-                state[FAULT_ROW][FAULT_COL] ^= FAULT_VALUE
-
-            snapshots["after_fault"] = clone(state)
-
-        mix_columns(state)
-
-        if rnd == 9:
-            snapshots["after_mixcolumns"] = clone(state)
-
-        add_round_key(state, round_keys[rnd])
-
-    # Final round (no MixColumns)
-    snapshots["before_last_subbytes"] = clone(state)
-
-    sub_bytes(state)
-    shift_rows(state)
-    add_round_key(state, round_keys[10])
-
-    snapshots["ciphertext"] = clone(state)
-
-    return state_to_bytes(state), snapshots, round_keys
-
-
-# ============================================================
-# AES INVERSE S-BOX
-# ============================================================
-
+# Build the inverse table once: INV_SBOX[SBOX[x]] == x for every byte x.
 INV_SBOX = [0] * 256
-
 for index, value in enumerate(SBOX):
     INV_SBOX[value] = index
 
+# Share the specification matrix with the AES implementation; never mutate it.
+MIX_MATRIX = aes.MIX_MATRIX
 
-# ============================================================
-# GF(2^8) MULTIPLICATION
-# ============================================================
+
+# ============================================================================
+# 3. STATE HELPERS AND FINITE-FIELD DIFFERENTIALS
+# ============================================================================
+
+
+def difference(a, b):
+    """Return a fresh XOR-difference matrix; inputs are never modified."""
+    return [[a[r][c] ^ b[r][c] for c in range(4)] for r in range(4)]
+
+
+def clone(state):
+    """Copy each row so a stored snapshot does not alias the active state."""
+    return [row[:] for row in state]
+
 
 def gf_multiply(a, b):
-    result = 0
+    """Retain the historical DFA helper name while sharing AES field arithmetic.
 
-    for _ in range(8):
-        if b & 1:
-            result ^= a
-
-        carry = a & 0x80
-        a = (a << 1) & 0xFF
-
-        if carry:
-            a ^= 0x1B
-
-        b >>= 1
-
-    return result
-
-
-MIX_MATRIX = [
-    [2, 3, 1, 1],
-    [1, 2, 3, 1],
-    [1, 1, 2, 3],
-    [3, 1, 1, 2],
-]
+    This makes the cipher and its differential equations use the same reduction
+    polynomial. The data being modeled is still a byte, not an integer product.
+    """
+    return aes.gf_mul(a, b)
 
 
 def predicted_mixcolumns_difference(row, fault):
+    """Multiply the selected unit-column error by the AES mixing matrix.
+
+    For fault row 0 the result is [2e, e, e, 3e]. Multiplications are in GF(2^8).
+    """
     return [gf_multiply(MIX_MATRIX[r][row], fault) for r in range(4)]
 
 
-# ============================================================
-# RECONSTRUCT THE DIFFERENCE BEFORE FINAL SUBBYTES
-#
-# We use the known round key ONLY to demonstrate the
-# mathematical relationship. In a real DFA attack,
-# the corresponding key bytes are unknown.
-# ============================================================
-
 def reverse_last_round_difference(correct_ciphertext, faulty_ciphertext, last_round_key,):
+    """Verify the differential relation with an already known K10 matrix.
+
+    This is a teacher-only check. It must not be confused with key_candidates,
+    which enumerates unknown key guesses from observable ciphertext pairs.
+    """
     correct = bytes_to_state(correct_ciphertext)
     faulty = bytes_to_state(faulty_ciphertext)
 
@@ -184,11 +117,258 @@ def reverse_last_round_difference(correct_ciphertext, faulty_ciphertext, last_ro
     return difference(correct, faulty)
 
 
-# ============================================================
-# MAIN SIMULATION
-# ============================================================
+# ============================================================================
+# 4. TARGET SIMULATION: ROUND-8/9 FAULTS AND IMMUTABLE TRACES
+# ============================================================================
+
+
+def encrypt_with_trace(plaintext, key, row=0, column=0, mask=0, fault_round=8):
+    """Simulator only: XOR a byte before selected round-8/9 MixColumns.
+
+    Round 8 lets one fault propagate into all four final-round key groups.
+    Round 9 constrains one group; the PDF runner repeats across all columns.
+    mask=0 records a clean execution at the same labeled injection point.
+    Snapshots are immutable bytes, so later operations cannot overwrite them.
+    """
+    if len(plaintext) != 16 or len(key) != 16:
+        raise ValueError("AES-128 requires a 16-byte key and plaintext.")
+    if not (0 <= row < 4 and 0 <= column < 4 and 0 <= mask <= 255):
+        raise ValueError("Fault coordinates must be 0..3 and mask 0..255.")
+    if fault_round not in (8, 9):
+        raise ValueError("Fault round must be 8 or 9.")
+    state, keys, trace = bytes_to_state(plaintext), key_expansion(key), []
+
+    def record(number, operation):
+        # Serialize now: retaining a reference to state would corrupt old steps.
+        trace.append((number, operation, state_to_bytes(state)))
+
+    add_round_key(state, keys[0])
+    for number in range(1, 11):
+        sub_bytes(state)
+        record(number, "SubBytes")
+        shift_rows(state)
+        record(number, "ShiftRows")
+        if number == fault_round:
+            # One transient data fault: do not modify key material or the S-box.
+            state[row][column] ^= mask
+            record(number, "Fault point")
+        if number != 10:
+            # Use the pure single-column AES helper to avoid presentation prints.
+            for col in range(4):
+                mixed = aes.mix_column([state[r][col] for r in range(4)])
+                for r in range(4):
+                    state[r][col] = mixed[r]
+            record(number, "MixColumns")
+        add_round_key(state, keys[number])
+        record(number, "AddRoundKey")
+    return state_to_bytes(state), trace
+
+
+def trace_round8(plaintext, key, row=0, column=0, mask=0, fault_round=8):
+    """Backward-compatible name used by terminal, GUI and MATLAB export tools.
+
+    Despite its historical name, fault_round explicitly supports both 8 and 9.
+    New simulation code should read encrypt_with_trace for the complete engine.
+    """
+    return encrypt_with_trace(plaintext, key, row, column, mask, fault_round)
+
+
+def encrypt(plaintext, key, inject_fault=False):
+    """Compatibility API for the original round-9 known-key relation lesson.
+
+    Return (ciphertext, named state snapshots, round-key matrices). The public
+    fault globals still control this helper, but the underlying engine receives
+    them as explicit arguments instead of modifying global cipher behavior.
+    """
+    ciphertext, trace = encrypt_with_trace(plaintext, key, FAULT_ROW, FAULT_COL, FAULT_VALUE if inject_fault else 0, fault_round=9)
+    states = {(number, operation): value for number, operation, value in trace}
+    snapshot_points = {"before_fault": (9, "ShiftRows"), "after_fault": (9, "Fault point"), "after_mixcolumns": (9, "MixColumns"), "before_last_subbytes": (9, "AddRoundKey"), "ciphertext": (10, "AddRoundKey")}
+    snapshots = {name: bytes_to_state(states[point]) for name, point in snapshot_points.items()}
+    return ciphertext, snapshots, key_expansion(key)
+
+
+def aes_target_encrypt(plaintext, key):
+    """Call the actual aes.py cipher while suppressing its teaching print/pause."""
+    previous = aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS
+    try:
+        aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS = False, False
+        with redirect_stdout(io.StringIO()):
+            return aes.aes_encrypt(plaintext, key)
+    finally:
+        # Restore caller settings even if encryption or validation raises an error.
+        aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS = previous
+
+
+# ============================================================================
+# 5. ATTACKER VIEW: POSITION MAPPING AND KEY-CANDIDATE INTERSECTIONS
+# ============================================================================
+
+
+def output_positions(column):
+    """Undo the final ShiftRows position mapping, keeping row order."""
+    if not 0 <= column < 4:
+        raise ValueError("AES column must be 0..3.")
+    # Row r moves from column c to (c-r) mod 4 in the final ShiftRows.
+    return tuple(4 * ((column - row) % 4) + row for row in range(4))
+
+
+def key_candidates(correct, faulty, column):
+    """Derive four-byte K10 candidates from ciphertexts only.
+
+    For each guessed byte k, undo final AddRoundKey and SubBytes:
+      d = InvSbox[C[p] XOR k] XOR InvSbox[Cfault[p] XOR k].
+    All four differences must fit ONE matrix column times ONE unknown error.
+    """
+    if len(correct) != 16 or len(faulty) != 16:
+        raise ValueError("Ciphertexts must each contain exactly 16 bytes.")
+    # Each table maps a possible input difference d to compatible byte guesses.
+    # Four small lookups avoid brute-force enumeration of all 2^32 quartets.
+    tables = []
+    for position in output_positions(column):
+        table = [[] for _ in range(256)]
+        for guess in range(256):
+            delta = INV_SBOX[correct[position] ^ guess] ^ INV_SBOX[faulty[position] ^ guess]
+            table[delta].append(guess)
+        tables.append(table)
+    found = set()
+    for unknown_row in range(4):
+        for unknown_error in range(1, 256):
+            # A single shared row/error must satisfy ALL four equations.
+            # Independent byte filtering alone would lose this constraint.
+            choices = [tables[r][gf_multiply(MIX_MATRIX[r][unknown_row], unknown_error)] for r in range(4)]
+            found.update(product(*choices))
+    return found
+
+
+def recover_last_key(correct, faulty_outputs, observer=None):
+    """Attacker API: no master key, plaintext, fault mask or internal states.
+
+    The optional observer is for logging only; it cannot modify candidate sets.
+    A None result means ambiguity, never an arbitrary candidate selection.
+    """
+    if len(correct) != 16:
+        raise ValueError("Correct ciphertext must contain 16 bytes.")
+    groups, used = [None] * 4, 0
+    for used, faulty in enumerate(faulty_outputs, 1):
+        if len(faulty) != 16 or any(a == b for a, b in zip(correct, faulty)):
+            raise ValueError("Expected 16 changed output bytes for the round-8 byte-fault model.")
+        for column in range(4):
+            fresh = key_candidates(correct, faulty, column)
+            before = None if groups[column] is None else len(groups[column])
+            # An intersection can retain/remove candidates, never introduce new ones.
+            groups[column] = fresh if groups[column] is None else groups[column] & fresh
+            if not groups[column]:
+                raise ValueError("Empty candidate intersection: incompatible ciphertexts or fault model.")
+            if observer:
+                observer(used, column, before, len(fresh), tuple(sorted(groups[column])))
+        if all(len(group) == 1 for group in groups):
+            # Group tuples are in pre-ShiftRows row order. Restore true K10 order.
+            last_key = bytearray(16)
+            for column in range(4):
+                for position, byte in zip(output_positions(column), next(iter(groups[column]))):
+                    last_key[position] = byte
+            return bytes(last_key), used
+    return None, used
+
+
+# ============================================================================
+# 6. REVERSE THE KEY SCHEDULE: FINAL ROUND KEY K10 TO MASTER KEY K0
+# ============================================================================
+
+
+def reverse_key_schedule(last_key, observer=None):
+    """AES-128 recurrence reversed: w[i-4] = w[i] XOR transform(w[i-1]).
+
+    Descending order guarantees that both right-hand words are already known.
+    Reversal still uses the FORWARD S-box: its input word is known, so there
+    is no reason to invert SubWord. This function never reads the master key.
+    """
+    if len(last_key) != 16:
+        raise ValueError("K10 must contain 16 bytes.")
+    words = [None] * 44
+    # K10 occupies the final four schedule words, w40 through w43.
+    words[40:] = [list(last_key[index:index+4]) for index in range(0, 16, 4)]
+    for index in range(43, 3, -1):
+        transformed = words[index - 1][:]
+        if index % 4 == 0:
+            # Same RotWord/SubWord/Rcon transformation as forward expansion.
+            transformed = [SBOX[byte] for byte in transformed[1:] + transformed[:1]]
+            transformed[0] ^= aes.RCON[index // 4]
+        words[index - 4] = [a ^ b for a, b in zip(words[index], transformed)]
+        if observer:
+            observer(index, bytes(words[index]), bytes(transformed), bytes(words[index - 4]))
+    return bytes(sum(words[:4], []))
+
+
+# ============================================================================
+# 7. PRESENTATION: MATRICES, ANSI COLORS AND OPTIONAL PAUSES
+# ============================================================================
+
+
+def show_state(title, state):
+    """Display a row-indexed state without transposing its AES layout."""
+    print("\n" + title)
+    print("-" * 32)
+    for row in state:
+        print(" ".join(f"{byte:02X}" for byte in row))
+
+
+def show_difference(title, a, b):
+    """Present the difference rather than the two underlying secret states."""
+    show_state(title, difference(a, b))
+
+
+class Terminal:
+    """ANSI styling is optional; redirected output stays readable by default."""
+    def __init__(self, color="auto", step=False):
+        self.color = color == "always" or color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ
+        self.step = step
+        if self.color and os.name == "nt":
+            # Enable virtual-terminal processing without requiring colorama.
+            import ctypes
+            kernel = ctypes.windll.kernel32
+            handle, mode = kernel.GetStdHandle(-11), ctypes.c_ulong()
+            if not kernel.GetConsoleMode(handle, ctypes.byref(mode)) or not kernel.SetConsoleMode(handle, mode.value | 4):
+                self.color = color == "always"
+
+    def paint(self, text, code="36"):
+        """Wrap one fragment in ANSI codes; reset immediately to avoid color bleed."""
+        return f"\033[{code}m{text}\033[0m" if self.color else str(text)
+
+    def section(self, title):
+        """Print a visible teaching boundary without affecting cryptographic data."""
+        print("\n" + self.paint("=" * 76, "36"))
+        print(self.paint(title, "1;36"))
+
+    def pause(self):
+        """Automatic execution remains the default unless --step was requested."""
+        if self.step:
+            input("\nPress Enter to continue...")
+
+    def compare(self, correct, faulty):
+        """Compare two 16-byte states in AES row order and highlight fault effects."""
+        delta = bytes(a ^ b for a, b in zip(correct, faulty))
+        print("          CLEAN STATE         FAULTY STATE        XOR DIFFERENCE")
+        for row in range(4):
+            clean_cells, faulty_cells, diff_cells = [], [], []
+            for column in range(4):
+                index = 4 * column + row
+                clean_cells.append(f"{correct[index]:02X}")
+                faulty_cells.append(self.paint(f"{faulty[index]:02X}", "31") if delta[index] else f"{faulty[index]:02X}")
+                diff_cells.append(self.paint(f"{delta[index]:02X}", "31") if delta[index] else "00")
+            print(f"row {row}:    {' '.join(clean_cells)}        {' '.join(faulty_cells)}        {' '.join(diff_cells)}")
+        changed = [i for i, byte in enumerate(delta) if byte]
+        print(f"Changed bytes: {len(changed)}/16 | Changed bits: {sum(bin(b).count('1') for b in delta)}/128")
+        print(f"Changed flat positions (4*column+row): {changed}")
+
+
+# ============================================================================
+# 8. LEGACY ROUND-9 RELATION CHECK WITH A KNOWN KEY
+# ============================================================================
+
 
 def relation_demo():
+    """Original known-key illustration; the recovery CLI lives in main()."""
     key = bytes.fromhex(KEY)
     plaintext = bytes.fromhex(PLAINTEXT)
 
@@ -290,172 +470,17 @@ def relation_demo():
     print("not recover an unknown key.")
 
 
-def trace_round8(plaintext, key, row=0, column=0, mask=0, fault_round=8):
-    """Simulator only: XOR a byte before selected round-8/9 MixColumns.
-
-    The old encrypt() above retains its round-9 behavior for existing callers.
-    This earlier location makes all four key groups observable in one output.
-    """
-    if len(plaintext) != 16 or len(key) != 16:
-        raise ValueError("AES-128 requires a 16-byte key and plaintext.")
-    if not (0 <= row < 4 and 0 <= column < 4 and 0 <= mask <= 255):
-        raise ValueError("Fault coordinates must be 0..3 and mask 0..255.")
-    if fault_round not in (8, 9):
-        raise ValueError("Fault round must be 8 or 9.")
-    state, keys, trace = bytes_to_state(plaintext), key_expansion(key), []
-
-    def record(number, operation):
-        trace.append((number, operation, state_to_bytes(state)))
-
-    add_round_key(state, keys[0])
-    for number in range(1, 11):
-        sub_bytes(state)
-        record(number, "SubBytes")
-        shift_rows(state)
-        record(number, "ShiftRows")
-        if number == fault_round:
-            state[row][column] ^= mask
-            record(number, "Fault point")
-        if number != 10:
-            # Implement the same column operation without the terminal demo's prints.
-            for col in range(4):
-                original = [state[r][col] for r in range(4)]
-                for r in range(4):
-                    value = 0
-                    for index in range(4):
-                        value ^= gf_multiply(MIX_MATRIX[r][index], original[index])
-                    state[r][col] = value
-            record(number, "MixColumns")
-        add_round_key(state, keys[number])
-        record(number, "AddRoundKey")
-    return state_to_bytes(state), trace
-
-
-def output_positions(column):
-    """Undo the final ShiftRows position mapping, keeping row order."""
-    return tuple(4 * ((column - row) % 4) + row for row in range(4))
-
-
-def key_candidates(correct, faulty, column):
-    """Derive four-byte K10 candidates from ciphertexts only.
-
-    For each guessed byte k, undo final AddRoundKey and SubBytes:
-      d = InvSbox[C[p] XOR k] XOR InvSbox[Cfault[p] XOR k].
-    All four differences must fit ONE matrix column times ONE unknown error.
-    """
-    tables = []
-    for position in output_positions(column):
-        table = [[] for _ in range(256)]
-        for guess in range(256):
-            delta = INV_SBOX[correct[position] ^ guess] ^ INV_SBOX[faulty[position] ^ guess]
-            table[delta].append(guess)
-        tables.append(table)
-    found = set()
-    for unknown_row in range(4):
-        for unknown_error in range(1, 256):
-            choices = [tables[r][gf_multiply(MIX_MATRIX[r][unknown_row], unknown_error)] for r in range(4)]
-            found.update(product(*choices))
-    return found
-
-
-def recover_last_key(correct, faulty_outputs, observer=None):
-    """Attacker API: no master key, plaintext, fault mask or internal states.
-
-    The optional observer is for logging only; it cannot modify candidate sets.
-    A None result means ambiguity, never an arbitrary candidate selection.
-    """
-    if len(correct) != 16:
-        raise ValueError("Correct ciphertext must contain 16 bytes.")
-    groups, used = [None] * 4, 0
-    for used, faulty in enumerate(faulty_outputs, 1):
-        if len(faulty) != 16 or any(a == b for a, b in zip(correct, faulty)):
-            raise ValueError("Expected 16 changed output bytes for the round-8 byte-fault model.")
-        for column in range(4):
-            fresh = key_candidates(correct, faulty, column)
-            before = None if groups[column] is None else len(groups[column])
-            groups[column] = fresh if groups[column] is None else groups[column] & fresh
-            if not groups[column]:
-                raise ValueError("Empty candidate intersection: incompatible ciphertexts or fault model.")
-            if observer:
-                observer(used, column, before, len(fresh), tuple(sorted(groups[column])))
-        if all(len(group) == 1 for group in groups):
-            last_key = bytearray(16)
-            for column in range(4):
-                for position, byte in zip(output_positions(column), next(iter(groups[column]))):
-                    last_key[position] = byte
-            return bytes(last_key), used
-    return None, used
-
-
-def reverse_key_schedule(last_key, observer=None):
-    """AES-128 recurrence reversed: w[i-4] = w[i] XOR transform(w[i-1])."""
-    if len(last_key) != 16:
-        raise ValueError("K10 must contain 16 bytes.")
-    words = [None] * 44
-    words[40:] = [list(last_key[index:index+4]) for index in range(0, 16, 4)]
-    for index in range(43, 3, -1):
-        transformed = words[index - 1][:]
-        if index % 4 == 0:
-            transformed = [SBOX[byte] for byte in transformed[1:] + transformed[:1]]
-            transformed[0] ^= aes.RCON[index // 4]
-        words[index - 4] = [a ^ b for a, b in zip(words[index], transformed)]
-        if observer:
-            observer(index, bytes(words[index]), bytes(transformed), bytes(words[index - 4]))
-    return bytes(sum(words[:4], []))
-
-
-class Terminal:
-    """ANSI styling is optional; redirected output stays readable by default."""
-    def __init__(self, color="auto", step=False):
-        self.color = color == "always" or color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ
-        self.step = step
-        if self.color and os.name == "nt":
-            # Enable virtual-terminal processing without requiring colorama.
-            import ctypes
-            kernel = ctypes.windll.kernel32
-            handle, mode = kernel.GetStdHandle(-11), ctypes.c_ulong()
-            if not kernel.GetConsoleMode(handle, ctypes.byref(mode)) or not kernel.SetConsoleMode(handle, mode.value | 4):
-                self.color = color == "always"
-
-    def paint(self, text, code="36"):
-        return f"\033[{code}m{text}\033[0m" if self.color else str(text)
-
-    def section(self, title):
-        print("\n" + self.paint("=" * 76, "36"))
-        print(self.paint(title, "1;36"))
-
-    def pause(self):
-        if self.step:
-            input("\nPress Enter to continue...")
-
-    def compare(self, correct, faulty):
-        delta = bytes(a ^ b for a, b in zip(correct, faulty))
-        print("          CLEAN STATE         FAULTY STATE        XOR DIFFERENCE")
-        for row in range(4):
-            clean_cells, faulty_cells, diff_cells = [], [], []
-            for column in range(4):
-                index = 4 * column + row
-                clean_cells.append(f"{correct[index]:02X}")
-                faulty_cells.append(self.paint(f"{faulty[index]:02X}", "31") if delta[index] else f"{faulty[index]:02X}")
-                diff_cells.append(self.paint(f"{delta[index]:02X}", "31") if delta[index] else "00")
-            print(f"row {row}:    {' '.join(clean_cells)}        {' '.join(faulty_cells)}        {' '.join(diff_cells)}")
-        changed = [i for i, byte in enumerate(delta) if byte]
-        print(f"Changed bytes: {len(changed)}/16 | Changed bits: {sum(bin(b).count('1') for b in delta)}/128")
-        print(f"Changed flat positions (4*column+row): {changed}")
-
-
-def aes_target_encrypt(plaintext, key):
-    """Call the actual aes.py cipher while suppressing its teaching print/pause."""
-    previous = aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS
-    try:
-        aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS = False, False
-        with redirect_stdout(io.StringIO()):
-            return aes.aes_encrypt(plaintext, key)
-    finally:
-        aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS = previous
+# ============================================================================
+# 9. TERMINAL KEY-RECOVERY LESSON
+# ============================================================================
 
 
 def main(argv=None):
+    """Orchestrate teacher views, ciphertext-only solving and final verification.
+
+    Reading aes.KEY belongs to the target simulator. The solver is deliberately
+    called with only outputs; known plaintext enters again during verification.
+    """
     parser = argparse.ArgumentParser(description="Recover the AES-128 key configured in aes.py with a didactic Piret-style software DFA.")
     parser.add_argument("--step", action="store_true", help="Pause after each teaching stage and key-schedule round.")
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto")

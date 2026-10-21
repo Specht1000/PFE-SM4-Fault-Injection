@@ -1,29 +1,49 @@
+"""AES-128 primitives and a visible, single-block encryption lesson.
 
-# ============================================================
-# AES-128 - DIDACTIC IMPLEMENTATION
-# PFE 5A - Polytech Montpellier / STMicroelectronics
-# Guilherme Martins Specht
-# ============================================================
+Author: Guilherme Martins Specht / PFE 5A / Polytech Montpellier.
+Academic and industrial context: STMicroelectronics.
 
-# ============================================================
-# 1. CONFIGURATION - CHANGE VALUES HERE
-# ============================================================
+Reading order: configuration -> constants -> state conversion -> finite-field
+arithmetic -> round transformations -> key expansion -> terminal demonstration.
+
+The state is stored as state[row][column]. Input and output bytes are serialized
+column by column: byte_index = 4 * column + row. Round transformations modify
+this matrix in place; conversion functions produce independent containers.
+
+Importing the module does not run the lesson. Terminal, GUI and DFA tools reuse
+the same primitives. This file handles one raw block, without padding or modes.
+"""
+
+
+# ============================================================================
+# 1. EDITABLE EXAMPLE AND DISPLAY SETTINGS
+# ============================================================================
+
 
 KEY = "000102030405060708090A0B0C0D0E0F"
 
+
 PLAINTEXT = "00112233445566778899AABBCCDDEEFF"
 
-# True: pause after each operation (press Enter)
-# False: execute everything automatically
+
+# True pauses after each operation; False runs without waiting for input.
 STEP_BY_STEP = True
 
-# True: show detailed calculations in MixColumns
+
+# True prints the finite-field products for the first MixColumns column.
 SHOW_CALCULATIONS = True
 
 
-# ============================================================
-# 2. AES S-BOX
-# ============================================================
+BLOCK_SIZE = 16
+
+
+N_ROUNDS = 10
+
+
+# ============================================================================
+# 2. AES CONSTANTS: NONLINEAR SUBSTITUTION AND LINEAR DIFFUSION
+# ============================================================================
+
 
 SBOX = [
     0x63,0x7C,0x77,0x7B,0xF2,0x6B,0x6F,0xC5,
@@ -60,41 +80,37 @@ SBOX = [
     0x41,0x99,0x2D,0x0F,0xB0,0x54,0xBB,0x16
 ]
 
+
+# Index 0 is unused; RCON[1] is applied when deriving the first round key.
 RCON = [
     0x00, 0x01, 0x02, 0x04, 0x08,
     0x10, 0x20, 0x40, 0x80, 0x1B, 0x36
 ]
 
 
-# ============================================================
-# 3. DISPLAY FUNCTIONS
-# ============================================================
-
-def pause():
-    if STEP_BY_STEP:
-        input("\nPress ENTER to continue...")
-
-
-def print_state(state, title):
-    print(f"\n{title}")
-    print("-" * 35)
-
-    for row in range(4):
-        print("   " + "  ".join(f"{state[row][col]:02X}" for col in range(4)))
+# Each row contains the coefficients for one output byte of a column.
+MIX_MATRIX = [
+    [2, 3, 1, 1],
+    [1, 2, 3, 1],
+    [1, 1, 2, 3],
+    [3, 1, 1, 2]
+]
 
 
-def print_separator(round_number):
-    print("\n" + "=" * 55)
-    print(f"                 ROUND {round_number}")
-    print("=" * 55)
+# ============================================================================
+# 3. INPUT VALIDATION AND COLUMN-MAJOR STATE CONVERSION
+# ============================================================================
 
 
-# ============================================================
-# 4. STATE CONVERSION
-# AES uses COLUMN-MAJOR representation
-# ============================================================
+def validate_block(data, label="Block"):
+    """Reject incomplete or oversized inputs instead of silently dropping bytes."""
+    if len(data) != BLOCK_SIZE:
+        raise ValueError(f"{label} must contain exactly {BLOCK_SIZE} bytes.")
+
 
 def bytes_to_state(data):
+    """Map 16 bytes into a fresh 4x4 matrix using the AES column-major layout."""
+    validate_block(data)
     state = [[0] * 4 for _ in range(4)]
 
     for col in range(4):
@@ -105,43 +121,20 @@ def bytes_to_state(data):
 
 
 def state_to_bytes(state):
+    """Serialize the matrix in the same column order used by bytes_to_state."""
     return bytes(state[row][col] for col in range(4) for row in range(4))
 
 
-# ============================================================
-# 5. SUBBYTES
-# Replace each byte using the AES S-BOX
-# ============================================================
+# ============================================================================
+# 4. FINITE-FIELD ARITHMETIC: GF(2^8), POLYNOMIAL 0x11B
+# ============================================================================
 
-def sub_bytes(state):
-    for row in range(4):
-        for col in range(4):
-            original = state[row][col]
-            state[row][col] = SBOX[original]
-
-
-# ============================================================
-# 6. SHIFTROWS
-# Row 0: shift 0
-# Row 1: shift 1
-# Row 2: shift 2
-# Row 3: shift 3
-# ============================================================
-
-def shift_rows(state):
-    for row in range(1, 4):
-        state[row] = (state[row][row:] + state[row][:row])
-
-
-# ============================================================
-# 7. FINITE FIELD ARITHMETIC
-# Multiplication in GF(2^8)
-# AES polynomial: x^8+x^4+x^3+x+1
-# ============================================================
 
 def xtime(a):
+    """Multiply a byte by x (02) in GF(2^8), reducing by polynomial 0x11B."""
     result = a << 1
 
+    # If the x^8 term overflows, reduction contributes 0x1B to the low byte.
     if a & 0x80:
         result ^= 0x1B
 
@@ -149,47 +142,62 @@ def xtime(a):
 
 
 def gf_mul(a, b):
+    """Multiply bytes in the AES field; field addition is XOR, not integer +."""
     result = 0
 
     for _ in range(8):
         if b & 1:
             result ^= a
 
+        # Shift-and-add multiplication, using xtime for polynomial reduction.
         a = xtime(a)
         b >>= 1
 
     return result
 
 
-# ============================================================
-# 8. MIXCOLUMNS
-#
-# [02 03 01 01]
-# [01 02 03 01]
-# [01 01 02 03]
-# [03 01 01 02]
-# ============================================================
+# ============================================================================
+# 5. ROUND TRANSFORMATIONS: ALL MATRIX OPERATIONS ARE IN PLACE
+# ============================================================================
 
-MIX_MATRIX = [
-    [2, 3, 1, 1],
-    [1, 2, 3, 1],
-    [1, 1, 2, 3],
-    [3, 1, 1, 2]
-]
+
+def sub_bytes(state):
+    """Apply the nonlinear S-box independently to each byte, in place.
+
+    This changes byte values but does not move bytes between state positions.
+    """
+    for row in range(4):
+        for col in range(4):
+            original = state[row][col]
+            state[row][col] = SBOX[original]
+
+
+def shift_rows(state):
+    """Rotate row r left by r bytes so the next MixColumns sees new groups."""
+    for row in range(1, 4):
+        state[row] = state[row][row:] + state[row][:row]
+
+
+def mix_column(column):
+    """Return M * column in GF(2^8), without modifying the four input bytes.
+
+    Copying a column before mixing matters: every output byte must use the same
+    original input, never a value already overwritten earlier in the operation.
+    """
+    result = []
+    for coefficients in MIX_MATRIX:
+        value = 0
+        for coefficient, byte in zip(coefficients, column):
+            value ^= gf_mul(coefficient, byte)
+        result.append(value)
+    return result
 
 
 def mix_columns(state):
+    """Mix all four columns in place and optionally explain the first column."""
     for col in range(4):
         original = [state[row][col] for row in range(4)]
-        result = [0] * 4
-
-        for row in range(4):
-            value = 0
-
-            for k in range(4):
-                value ^= gf_mul(MIX_MATRIX[row][k], original[k])
-
-            result[row] = value
+        result = mix_column(original)
 
         if SHOW_CALCULATIONS and col == 0:
             print("\nMixColumns - First column example:")
@@ -198,44 +206,53 @@ def mix_columns(state):
             for row in range(4):
                 terms = [f"{MIX_MATRIX[row][k]:02X}*{original[k]:02X}" for k in range(4)]
 
-                print(f"b{row} = {' XOR '.join(terms)}" f" = {result[row]:02X}")
+                print(f"b{row} = {' XOR '.join(terms)} = {result[row]:02X}")
 
         for row in range(4):
             state[row][col] = result[row]
 
 
-# ============================================================
-# 9. ADDROUNDKEY
-# State XOR Round Key
-# ============================================================
-
 def add_round_key(state, round_key):
+    """XOR each state byte with its key byte. The same operation undoes itself.
+
+    Applying the same round key to clean/faulty executions preserves their XOR
+    difference, which is one of the properties used in differential analysis.
+    """
     for row in range(4):
         for col in range(4):
             state[row][col] ^= round_key[row][col]
 
 
-# ============================================================
-# 10. KEY EXPANSION
-# Generate 11 round keys (AES-128)
-# ============================================================
+# ============================================================================
+# 6. KEY SCHEDULE: MASTER KEY K0 TO FINAL ROUND KEY K10
+# ============================================================================
+
 
 def rot_word(word):
+    """Rotate a four-byte key word left by one byte; leave the input unchanged."""
     return word[1:] + word[:1]
 
 
 def sub_word(word):
+    """Apply the encryption S-box to all four bytes of a key-schedule word."""
     return [SBOX[b] for b in word]
 
 
 def key_expansion(key):
-    # AES-128: 44 words of 4 bytes
+    """Expand the 16-byte master key into eleven independent round-key matrices.
+
+    Each new word XORs the word four positions back with the previous word.
+    Every fourth word first applies RotWord, SubWord and the round constant.
+    """
+    validate_block(key, "AES-128 key")
+    # Four initial words become 44 words: K0 plus ten encryption round keys.
     words = [list(key[4 * i:4 * i + 4]) for i in range(4)]
 
-    for i in range(4, 44):
+    for i in range(4, 4 * (N_ROUNDS + 1)):
         temp = words[i - 1].copy()
 
         if i % 4 == 0:
+            # Rcon changes only the first byte of the transformed key word.
             temp = sub_word(rot_word(temp))
             temp[0] ^= RCON[i // 4]
 
@@ -245,7 +262,8 @@ def key_expansion(key):
 
     round_keys = []
 
-    for round_number in range(11):
+    for round_number in range(N_ROUNDS + 1):
+        # Convert four consecutive words into the same layout as the data state.
         key_bytes = []
 
         for i in range(4):
@@ -256,11 +274,44 @@ def key_expansion(key):
     return round_keys
 
 
-# ============================================================
-# 11. COMPLETE AES-128 ENCRYPTION
-# ============================================================
+# ============================================================================
+# 7. TERMINAL PRESENTATION HELPERS
+# ============================================================================
+
+
+def pause():
+    """Pause only when the standalone teaching mode requests user interaction."""
+    if STEP_BY_STEP:
+        input("\nPress ENTER to continue...")
+
+
+def print_state(state, title):
+    """Display rows horizontally, even though byte serialization is column-major."""
+    print(f"\n{title}")
+    print("-" * 35)
+
+    for row in range(4):
+        print("   " + "  ".join(f"{state[row][col]:02X}" for col in range(4)))
+
+
+def print_separator(round_number):
+    """Make round boundaries visible without changing the encryption state."""
+    print("\n" + "=" * 55)
+    print(f"                 ROUND {round_number}")
+    print("=" * 55)
+
+
+# ============================================================================
+# 8. COMPLETE SINGLE-BLOCK ENCRYPTION LESSON
+# ============================================================================
+
 
 def aes_encrypt(plaintext, key):
+    """Encrypt one block while displaying each operation in execution order.
+
+    The initial key XOR is round 0. Rounds 1..9 have all four operations;
+    round 10 intentionally omits MixColumns. The input bytes are not mutated.
+    """
     state = bytes_to_state(plaintext)
     round_keys = key_expansion(key)
 
@@ -285,7 +336,7 @@ def aes_encrypt(plaintext, key):
     # ROUNDS 1 TO 9
     # --------------------------------------------------------
 
-    for round_number in range(1, 10):
+    for round_number in range(1, N_ROUNDS):
         print_separator(round_number)
 
         print("\n[1] SUBBYTES")
@@ -315,7 +366,7 @@ def aes_encrypt(plaintext, key):
     # ROUND 10 - NO MIXCOLUMNS
     # --------------------------------------------------------
 
-    print_separator(10)
+    print_separator(N_ROUNDS)
 
     print("\n[1] SUBBYTES")
     sub_bytes(state)
@@ -330,19 +381,21 @@ def aes_encrypt(plaintext, key):
     print("\n[3] ADDROUNDKEY")
     print("\nNOTE: The last AES round has no MixColumns.")
 
-    print_state(round_keys[10], "Final Round Key")
+    print_state(round_keys[N_ROUNDS], "Final Round Key")
 
-    add_round_key(state, round_keys[10])
+    add_round_key(state, round_keys[N_ROUNDS])
     print_state(state, "Final State")
 
     return state_to_bytes(state)
 
 
-# ============================================================
-# 12. MAIN
-# ============================================================
+# ============================================================================
+# 9. STANDALONE ENTRY POINT
+# ============================================================================
+
 
 def main():
+    """Read the editable example configuration and run its known-answer check."""
     key = bytes.fromhex(KEY)
     plaintext = bytes.fromhex(PLAINTEXT)
 
