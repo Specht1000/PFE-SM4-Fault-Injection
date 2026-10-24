@@ -1,6 +1,5 @@
 """One command: AES + Piret and SM4 + DFA, following AES_SM4_DFA.pdf."""
 import argparse
-from functools import lru_cache
 import random
 import struct
 import aes
@@ -97,138 +96,66 @@ def aes_demo(terminal, limit, seed):
     return True
 
 
-@lru_cache(maxsize=1)
 def inverse_rows():
-    """Invert SM4 L's 32x32 binary matrix with Gaussian elimination."""
-    columns = [sm4.linear(1 << i) for i in range(32)]
-    rows = [sum(((columns[col] >> row) & 1) << col for col in range(32)) | (1 << (32 + row)) for row in range(32)]
-    for column in range(32):
-        pivot = next(row for row in range(column, 32) if (rows[row] >> column) & 1)
-        rows[column], rows[pivot] = rows[pivot], rows[column]
-        for row in range(32):
-            if row != column and (rows[row] >> column) & 1:
-                rows[row] ^= rows[column]
-    return tuple(row >> 32 for row in rows)
+    """Compatibility adapter; the attack calculation lives in piret.py."""
+    return piret.inverse_rows()
 
 
 def inverse_linear(value):
-    return sum((bin(row & value).count("1") & 1) << index for index, row in enumerate(inverse_rows()))
+    """Compatibility adapter; the attack calculation lives in piret.py."""
+    return piret.inverse_linear(value)
 
 
-def sm4_encrypt(plaintext, key, byte=None, mask=0):
-    """Controlled fault on A (S-box input), zero-based round 31 only."""
-    if len(plaintext) != 16 or len(key) != 16 or byte is not None and not (0 <= byte < 4 and 1 <= mask <= 255):
-        raise ValueError("SM4 requires 16-byte inputs and a valid nonzero byte fault.")
-    keys, x, trace = sm4.key_expansion(key), list(struct.unpack(">4I", plaintext)), []
-    for index, rk in enumerate(keys):
-        original = x[index+1] ^ x[index+2] ^ x[index+3] ^ rk
-        value = original ^ (mask << (24 - 8 * byte)) if index == 31 and byte is not None else original
-        substituted = sm4.sbox(value)
-        linear = sm4.linear(substituted)
-        x.append(x[index] ^ linear)
-        trace.append(dict(round=index, a=value, b=substituted, linear=linear, new=x[-1], rk=rk))
-    return struct.pack(">4I", *x[-4:][::-1]), trace
+def sm4_encrypt(plaintext, key, byte=None, mask=0, fault_round=31):
+    """Terminal compatibility adapter; attack injection belongs to piret.py."""
+    return piret.sm4_fault_encrypt(plaintext, key, byte, mask, fault_round)
 
 
 def sm4_byte_candidates(correct, faulty, byte, mask):
-    """Attacker API: outputs and the PDF's KNOWN fault byte/value only."""
-    if len(correct) != 16 or len(faulty) != 16 or not 0 <= byte < 4 or not 1 <= mask <= 255:
-        raise ValueError("Invalid SM4 output or known-fault descriptor.")
-    c, f = struct.unpack(">4I", correct), struct.unpack(">4I", faulty)
-    if c[1:] != f[1:]:
-        raise ValueError("The last-round model requires three output words unchanged.")
-    delta_b = inverse_linear(c[0] ^ f[0])
-    shift = 24 - 8 * byte
-    if not delta_b or delta_b & ~(255 << shift):
-        raise ValueError("Difference does not match a single-byte S-box input fault.")
-    d = (delta_b >> shift) & 255
-    known = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
-    inputs = {a for a in range(256) if sm4.SBOX[a] ^ sm4.SBOX[a ^ mask] == d}
-    return {a ^ known for a in inputs}, inputs, delta_b
+    """Compatibility adapter; the attack calculation lives in piret.py."""
+    return piret.sm4_byte_candidates(correct, faulty, byte, mask)
 
 
 def reverse_sm4(final_keys, observer=None):
-    """Four consecutive keys rk28..rk31 are REQUIRED, not merely rk31."""
-    if len(final_keys) != 4:
-        raise ValueError("SM4 reversal requires four consecutive final subkeys.")
-    words = [None] * 32 + list(final_keys)
-    for index in range(31, -1, -1):
-        value = words[index+1] ^ words[index+2] ^ words[index+3] ^ sm4.CK[index]
-        words[index] = words[index+4] ^ sm4.linear_key(sm4.sbox(value))
-        if observer:
-            observer(index, words[index])
-    return struct.pack(">4I", *(words[i] ^ sm4.FK[i] for i in range(4)))
+    """Compatibility adapter; the attack calculation lives in piret.py."""
+    return piret.reverse_sm4(final_keys, observer)
 
 
-def sm4_demo(terminal, limit):
+def sm4_demo(terminal, limit, start_byte=0):
+    """Recover all four final subkeys through faults, then the complete key."""
     key, plaintext = block(sm4.KEY), block(sm4.PLAINTEXT)
     correct, trace = sm4_encrypt(plaintext, key)
-    terminal.section("SM4 / PDF CHAPTER 4: ENCRYPTION")
-    print("Key: " + key.hex().upper() + "\nPlaintext: " + plaintext.hex().upper())
-    print("A = X[i+1] XOR X[i+2] XOR X[i+3] XOR rk[i]; B = tau(A).")
-    print("L uses rotations 2,10,18,24. Key expansion uses L-prime rotations 13,23.")
+    terminal.section("SM4: NORMAL ENCRYPTION")
     for item in trace:
-        print(f"Round {item['round']:02d}: rk={item['rk']:08X} A={item['a']:08X} B={item['b']:08X} L(B)={item['linear']:08X} new={item['new']:08X}")
+        print(f"Round {item['round']:02d}: A={item['a']:08X} B={item['b']:08X} L(B)={item['linear']:08X} new={item['new']:08X}")
         terminal.pause()
-    print("Ciphertext (reversed words): " + correct.hex().upper())
-    terminal.section("SM4 / PDF CHAPTER 5: CONTROLLED LAST-ROUND DFA")
-    print("This is the PDF's SM4 model, not the AES Piret fault model.")
-    print("Assumption: KNOWN XOR on one A byte before the S-box in round 31.")
-    print("The attacker observes ciphertexts, knows byte/mask, and computes L-inverse.")
-    words = struct.unpack(">4I", correct)
-    known_word = words[1] ^ words[2] ^ words[3]
-    print(f"Observed X32 XOR X33 XOR X34 = {known_word:08X}; rk31 = A XOR this word.")
-    recovered_key = bytearray(4)
-    for byte in range(4):
-        survivors = None
-        for mask in range(1, limit + 1):
-            faulty, faulty_trace = sm4_encrypt(plaintext, key, byte, mask)
-            print(f"\nByte {byte} (0=MSB), known XOR {mask:02X}")
-            print("Teacher view: S-box input A, then output B; hidden from the solver.")
-            terminal.pair(trace[-1]["a"].to_bytes(4, "big"), faulty_trace[-1]["a"].to_bytes(4, "big"))
-            terminal.pair(trace[-1]["b"].to_bytes(4, "big"), faulty_trace[-1]["b"].to_bytes(4, "big"))
-            print("Observed ciphertexts:")
-            terminal.pair(correct, faulty)
-            fresh, inputs, delta_b = sm4_byte_candidates(correct, faulty, byte, mask)
-            before = 256 if survivors is None else len(survivors)
-            survivors = fresh if survivors is None else survivors & fresh
-            delta_x = int.from_bytes(correct[:4], "big") ^ int.from_bytes(faulty[:4], "big")
-            print(f"L-inverse({delta_x:08X}) = {delta_b:08X}")
-            print(f"S(a) XOR S(a XOR {mask:02X}) = {(delta_b >> (24-8*byte)) & 255:02X}")
-            print("S-box input candidates: " + " ".join(f"{v:02X}" for v in sorted(inputs)))
-            print(f"Convert each input guess a into key guess: k = a XOR {(known_word >> (24-8*byte)) & 255:02X}.")
-            print(f"Key-byte candidates: {before} -> {len(survivors)}: " + " ".join(f"{v:02X}" for v in sorted(survivors)))
-            terminal.pause()
-            if not survivors:
-                raise RuntimeError("SM4 candidate intersection is empty.")
-            if len(survivors) == 1:
-                recovered_key[byte] = next(iter(survivors))
-                break
-        else:
-            print(terminal.paint("SM4 rk31 remains ambiguous. Increase --observations.", "31"))
-            return False
-    rk31 = int.from_bytes(recovered_key, "big")
-    if rk31 != trace[-1]["rk"]:
-        raise RuntimeError("Recovered SM4 rk31 failed ground-truth verification.")
-    print(terminal.paint(f"DFA RECOVERED rk31 = {rk31:08X} / PASS", "32"))
-    c = struct.unpack(">4I", correct)
-    previous = c[0] ^ sm4.linear(sm4.sbox(c[1] ^ c[2] ^ c[3] ^ rk31))
-    print(f"Reconstructed X31 = {previous:08X}")
-    terminal.section("SM4 / PDF CHAPTER 6: CONDITIONAL MASTER-KEY REVERSAL")
-    print("Only rk31 was recovered by DFA. rk28..rk30 are supplied REFERENCE subkeys.")
-    print("This verifies schedule inversion; it is not a full DFA master-key recovery.")
-    references = sm4.key_expansion(key)[28:31]
-    print("Reference rk28..rk30: " + " ".join(f"{v:08X}" for v in references))
+    print("Ciphertext: " + correct.hex().upper())
+    terminal.section("SM4: FULL MASTER-KEY DFA / ROUNDS 31 -> 28")
+    print("Controlled faults in EACH final round are required. No reference subkeys are supplied.")
 
-    def reverse_step(index, value):
-        print(f"K[{index:02d}] = K[{index+4:02d}] XOR T-prime(K[{index+1:02d}] XOR K[{index+2:02d}] XOR K[{index+3:02d}] XOR CK[{index:02d}]) = {value:08X}")
+    def oracle(number, byte, mask):
+        return piret.sm4_fault_encrypt(plaintext, key, byte, mask, number)[0]
+
+    def report(event):
+        print(f"\nRound {event['round']}, byte {event['byte']}, observation {event['observation']}, mask {event['mask']:02X}")
+        terminal.pair(bytes.fromhex(event['correct']), bytes.fromhex(event['faulty']))
+        print("Undo later rounds using ONLY previously recovered subkeys: " + str(event['peeled_with']))
+        terminal.pair(bytes.fromhex(event['clean_view']), bytes.fromhex(event['faulty_view']))
+        print(f"L-inverse difference: {event['delta_b']:08X}; candidates {event['before']} -> {event['remaining']}")
+        print("Survivors: " + " ".join(f"{value:02X}" for value in event['survivors']))
         terminal.pause()
 
-    recovered = reverse_sm4(references + [rk31], reverse_step)
-    if recovered != key or sm4_encrypt(plaintext, recovered)[0] != correct:
-        raise RuntimeError("SM4 conditional schedule reversal failed.")
-    print("Undo FK: MK[i] = K[i] XOR FK[i].")
-    print(terminal.paint("SM4 MASTER KEY (using reference subkeys): " + recovered.hex().upper() + " / PASS", "32"))
+    result = piret.recover_sm4_master_key(correct, oracle, range(1, limit+1), start_byte, observer=report)
+    if not result['complete']:
+        print("SM4 recovery remains ambiguous. Increase --observations.")
+        return False
+    for number, value in result['round_keys'].items():
+        print(terminal.paint(f"DFA RECOVERED rk{number} = {value:08X} / PASS", "32"))
+    recovered = result['master_key']
+    if recovered != key or sm4.sm4_encrypt_block(plaintext, recovered) != correct:
+        raise RuntimeError("SM4 full master-key verification failed.")
+    print(terminal.paint("SM4 MASTER KEY: " + recovered.hex().upper() + " / PASS", "32"))
+    print(f"{result['used']} faulty outputs. All four subkeys came from DFA, not references.")
     return True
 
 

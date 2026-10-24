@@ -1,15 +1,15 @@
-"""AES / SM4 / Piret interactive lesson. Run: python src/crypto_lab_gui.py."""
+"""AES / SM4 / Piret / Giraud lessons. Run: python src/gui.py."""
 import json
 import queue
 import random
 import struct
 import threading
 import tkinter as tk
-from itertools import product
 from tkinter import filedialog, messagebox, ttk
 import aes
 import sm4
 import run as console
+import giraud
 
 AES_KEY = "000102030405060708090a0b0c0d0e0f"
 AES_INPUT = "00112233445566778899aabbccddeeff"
@@ -30,139 +30,85 @@ def snapshot(number, title, explanation, state, detail="", reference=None):
 
 
 def aes_trace(block, key, decrypt=False, fault=None):
-    """Use the existing AES primitives; expose each operation as a lesson step."""
+    """Display the actual cipher execution; fault injection stays in piret.py."""
+    steps = [snapshot(10 if decrypt else 0, "Input", "AES byte index = 4*column + row.", block)]
     keys = aes.key_expansion(key)
-    state = aes.bytes_to_state(block)
-    steps = [snapshot(10 if decrypt else 0, "Input", "AES stores consecutive input bytes vertically in columns.", block)]
+    descriptions = {"SubBytes": "Replace each byte through the nonlinear S-box.", "ShiftRows": "Rotate row r left by r positions.", "MixColumns": "Mix each column in GF(2^8).", "AddRoundKey": "XOR the state with the current round key.", "InvSubBytes": "Undo the nonlinear substitution.", "InvShiftRows": "Rotate rows right to undo ShiftRows.", "InvMixColumns": "Multiply columns by the inverse mixing matrix."}
+    if fault:
+        if decrypt:
+            raise ValueError("Piret fault injection is an encryption experiment.")
+        ciphertext, trace = console.piret.encrypt_with_trace(block, key, fault[1], fault[2], fault[3], fault_round=fault[0])
+        initial = aes.bytes_to_state(block)
+        aes.add_round_key(initial, keys[0])
+        steps.append(snapshot(0, "AddRoundKey", descriptions["AddRoundKey"], aes.state_to_bytes(initial)))
+        for number, operation, state in trace:
+            title = "Injected XOR" if operation == "Fault point" else operation
+            steps.append(snapshot(number, title, "External Piret callback changes one byte before MixColumns." if operation == "Fault point" else descriptions[operation], state))
+        return ciphertext, steps
 
-    def record(number, operation, description):
-        steps.append(snapshot(number, operation, description, aes.state_to_bytes(state), "Round key: " + aes.state_to_bytes(keys[number]).hex() if operation == "AddRoundKey" else ""))
+    def observer(number, operation, state):
+        if operation.startswith("After "):
+            title = operation[6:]
+            detail = "Round key: " + aes.state_to_bytes(keys[number]).hex() if title == "AddRoundKey" else ""
+            steps.append(snapshot(number, title, descriptions[title], aes.state_to_bytes(state), detail))
 
-    def substitute(inverse):
-        for row in range(4):
-            for column in range(4):
-                state[row][column] = (INV_SBOX if inverse else aes.SBOX)[state[row][column]]
-
-    def rotate(inverse):
-        for row in range(1, 4):
-            state[row] = state[row][-row:] + state[row][:-row] if inverse else state[row][row:] + state[row][:row]
-
-    def mix(inverse):
-        matrix = ((14, 11, 13, 9), (9, 14, 11, 13), (13, 9, 14, 11), (11, 13, 9, 14)) if inverse else aes.MIX_MATRIX
-        for column in range(4):
-            old = [state[row][column] for row in range(4)]
-            for row in range(4):
-                value = 0
-                for i in range(4):
-                    value ^= aes.gf_mul(matrix[row][i], old[i])
-                state[row][column] = value
-
-    aes.add_round_key(state, keys[10 if decrypt else 0])
-    record(10 if decrypt else 0, "AddRoundKey", "XOR the state with the round key. XOR is its own inverse.")
-    if decrypt:
-        for number in range(9, -1, -1):
-            rotate(True)
-            record(number, "InvShiftRows", "Rotate row r right by r positions to undo ShiftRows.")
-            substitute(True)
-            record(number, "InvSubBytes", "Apply the inverse S-box to every byte.")
-            aes.add_round_key(state, keys[number])
-            record(number, "AddRoundKey", "Undo the round-key XOR using the same round key.")
-            if number:
-                mix(True)
-                record(number, "InvMixColumns", "Multiply each column by the inverse matrix in GF(2^8).")
-    else:
-        for number in range(1, 11):
-            substitute(False)
-            record(number, "SubBytes", "Replace each byte using the nonlinear S-box.")
-            rotate(False)
-            record(number, "ShiftRows", "Rotate row r left by r columns, moving bytes between columns.")
-            if number != 10:
-                if fault and number == fault[0]:
-                    _, row, column, mask = fault
-                    state[row][column] ^= mask
-                    record(number, "Injected XOR", f"Before MixColumns: byte at row {row}, column {column} XOR {mask:02x}.")
-                mix(False)
-                record(number, "MixColumns", "Mix four bytes within each column using GF(2^8), where addition is XOR.")
-            aes.add_round_key(state, keys[number])
-            record(number, "AddRoundKey", "XOR with this round key. Round 10 has no MixColumns.")
-    return aes.state_to_bytes(state), steps
+    function = aes.aes_decrypt if decrypt else aes.aes_encrypt
+    output = function(block, key, observer=observer)
+    return output, steps
 
 
 def sm4_trace(block, key, decrypt=False):
-    """Expose the round XOR, S-box, linear map and new word independently."""
-    keys = sm4.key_expansion(key)
-    words = list(struct.unpack(">4I", block))
-    steps = [snapshot(0, "Input", "SM4 uses four big-endian 32-bit words. Each displayed row is one word.", block)]
-    for index in range(32):
-        key_index = 31 - index if decrypt else index
-        rk = keys[key_index]
-        mixed = words[1] ^ words[2] ^ words[3] ^ rk
-        substituted = sm4.sbox(mixed)
-        linear = sm4.linear(substituted)
-        new_word = words[0] ^ linear
-        state = struct.pack(">4I", *words)
-        steps.append(snapshot(index + 1, "Round XOR", "Combine the last three words with the round key.", state, f"B = W1 XOR W2 XOR W3 XOR rk[{key_index}]\n  = {words[1]:08x} XOR {words[2]:08x} XOR {words[3]:08x} XOR {rk:08x}\n  = {mixed:08x}"))
-        steps.append(snapshot(index + 1, "S-box / tau", "Apply the S-box independently to each byte of B. The rolling state has not shifted yet.", state, f"tau({mixed:08x}) = {substituted:08x}"))
-        steps.append(snapshot(index + 1, "Linear transform", "Diffuse substituted bits with XOR and rotations.", state, f"L(B) = B XOR ROL(B,2) XOR ROL(B,10) XOR ROL(B,18) XOR ROL(B,24)\nL({substituted:08x}) = {linear:08x}\nNew word = W0 XOR L(B) = {words[0]:08x} XOR {linear:08x} = {new_word:08x}"))
-        words = words[1:] + [new_word]
-        steps.append(snapshot(index + 1, "Shift / new word", "Discard the oldest word, shift left, and append the new word.", struct.pack(">4I", *words), f"Round key index: {key_index}. Decryption uses rk[31] down to rk[0]."))
-    output = struct.pack(">4I", *words[::-1])
-    steps.append(snapshot(32, "Output reversal", "Reverse the four words: X35 || X34 || X33 || X32.", output))
+    """Build visual steps from the actual SM4 engine, without reimplementing it."""
+    steps = [snapshot(0, "Input", "Each displayed row is a big-endian 32-bit word.", block)]
+    keys, current, values = sm4.key_expansion(key), block, {}
+
+    def observer(index, operation, value):
+        nonlocal current
+        if operation == "State input":
+            current = struct.pack(">4I", *value)
+        elif operation == "Sbox input":
+            values["a"] = value
+            key_index = 31 - index if decrypt else index
+            steps.append(snapshot(index+1, "Round XOR", "XOR the three newest words with the round key.", current, f"A = {value:08X}; rk[{key_index}] = {keys[key_index]:08X}"))
+        elif operation == "Sbox output":
+            values["b"] = value
+            steps.append(snapshot(index+1, "S-box / tau", "Substitute the four bytes; the rolling state is unchanged yet.", current, f"tau({values['a']:08X}) = {value:08X}"))
+        elif operation == "Linear output":
+            steps.append(snapshot(index+1, "Linear transform", "XOR rotations 2, 10, 18 and 24 for data diffusion.", current, f"L({values['b']:08X}) = {value:08X}"))
+        elif operation == "State output":
+            current = struct.pack(">4I", *value)
+            steps.append(snapshot(index+1, "Shift / new word", "Discard the oldest word and append the new word.", current))
+        elif operation == "Ciphertext":
+            steps.append(snapshot(32, "Output reversal", "Reverse the four final words.", value))
+
+    function = sm4.sm4_decrypt_block if decrypt else sm4.sm4_encrypt_block
+    output = function(block, key, observer=observer)
     return output, steps
 
 
 def positions(column):
-    return tuple(4 * ((column - row) % 4) + row for row in range(4))
+    """Presentation alias for the attack's final-ShiftRows position mapping."""
+    return console.piret.output_positions(column)
 
 
 def candidates(correct, faulty, column):
-    """Ciphertext-only solver; no injected mask, coordinates or key arguments."""
-    tables = []
-    for position in positions(column):
-        table = [[] for _ in range(256)]
-        for guess in range(256):
-            delta = INV_SBOX[correct[position] ^ guess] ^ INV_SBOX[faulty[position] ^ guess]
-            table[delta].append(guess)
-        tables.append(table)
-    survivors = set()
-    for row in range(4):
-        for error in range(1, 256):
-            survivors.update(product(*(tables[r][aes.gf_mul(aes.MIX_MATRIX[r][row], error)] for r in range(4))))
-    return survivors
+    """Candidate filtering belongs to the attack module, not the GUI."""
+    return console.piret.key_candidates(correct, faulty, column)
 
 
 def reverse_schedule(last_key):
-    words = [None] * 44
-    words[40:] = [list(last_key[i:i+4]) for i in range(0, 16, 4)]
-    for index in range(43, 3, -1):
-        temp = words[index - 1][:]
-        if index % 4 == 0:
-            temp = [aes.SBOX[b] for b in temp[1:] + temp[:1]]
-            temp[0] ^= aes.RCON[index // 4]
-        words[index - 4] = [a ^ b for a, b in zip(words[index], temp)]
-    return bytes(sum(words[:4], []))
+    return console.piret.reverse_key_schedule(last_key)
 
 
 def recover_key(correct, observations):
-    """Intersect four-byte tuples per group; return only a unique K10."""
-    groups = [None] * 4
+    """Translate the attack observer into the GUI's candidate-history format."""
     history = []
-    for index, faulty in enumerate(observations, 1):
-        if len(correct) != 16 or len(faulty) != 16 or any(a == b for a, b in zip(correct, faulty)):
-            raise ValueError("Expected the round-8 byte-fault model (16 changed output bytes).")
-        for column in range(4):
-            found = candidates(correct, faulty, column)
-            groups[column] = found if groups[column] is None else groups[column] & found
-            history.append((index, column, len(found), len(groups[column])))
-            if not groups[column]:
-                raise ValueError("No compatible key candidates. Check the fault model.")
-        if all(len(group) == 1 for group in groups):
-            key = bytearray(16)
-            for column in range(4):
-                for position, value in zip(positions(column), next(iter(groups[column]))):
-                    key[position] = value
-            return bytes(key), history, index
-    return None, history, len(observations)
+
+    def record(index, column, before, fresh, survivors):
+        history.append((index, column, fresh, len(survivors)))
+
+    key, used = console.piret.recover_last_key(correct, observations, observer=record)
+    return key, history, used
 
 
 def piret_lesson(block, key, row, column, mask, maximum):
@@ -231,50 +177,108 @@ def pdf_aes_lesson(block, key, row, column, mask, maximum):
     return dict(steps=steps, output=first_faulty.hex(), correct=correct.hex(), recovered_key=recovered.hex(), used=used, history=history, verified=True, model="AES round-9 Piret")
 
 
-def pdf_sm4_lesson(block, key, start_byte, mask, maximum):
-    """Recover rk31 under the PDF's known-XOR last-round S-box-input model."""
-    correct, clean_trace = console.sm4_encrypt(block, key)
+def sm4_master_lesson(block, key, start_byte, mask, maximum, giraud_mode=False, known_bit=False):
+    """Show output-only full recovery; no reference subkeys are supplied."""
+    correct = sm4.sm4_encrypt_block(block, key)
     _, steps = sm4_trace(block, key)
-    masks = [mask] + [value for value in range(1, 256) if value != mask][:maximum-1]
-    recovered_bytes, history, used = bytearray(4), [], 0
-    first_faulty = None
-    known_words = struct.unpack(">4I", correct)
-    known = known_words[1] ^ known_words[2] ^ known_words[3]
-    for byte in [(start_byte + offset) % 4 for offset in range(4)]:
+    model = "Giraud-inspired SM4 / full master-key recovery" if giraud_mode else "SM4 controlled DFA / full master-key recovery"
+    steps.append(snapshot(31, "Full recovery fault model", "Extend the PDF model to faults in rounds 31, 30, 29 and 28.", correct, "Recover the latest subkey first; undo only rounds with previously recovered keys. No reference subkeys."))
+
+    def oracle(number, byte, value):
+        target = giraud.sm4_fault_encrypt if giraud_mode else console.piret.sm4_fault_encrypt
+        return target(block, key, byte, value, number)[0]
+
+    def show(event):
+        detail = f"Round {event['round']}, byte {event['byte']}, observation {event['observation']}\nAlready recovered keys: {event['peeled_with']}\nOriginal correct: {event['correct']}\nOriginal faulty: {event['faulty']}\nL-inverse difference: {event['delta_b']:08X}\nCandidates: {event['before']} -> {event['remaining']}\nSurvivors: " + " ".join(f"{v:02X}" for v in event['survivors'])
+        steps.append(snapshot(event['round'], f"rk{event['round']} / byte {event['byte']} / observation {event['observation']}", "Undo later rounds with recovered subkeys, then filter candidates from the restored difference.", bytes.fromhex(event['faulty_view']), detail, bytes.fromhex(event['clean_view'])))
+
+    if giraud_mode:
+        result = giraud.recover_sm4_master_key(correct, oracle, mask, maximum, known_bit, start_byte, show)
+    else:
+        masks = [mask] + [v for v in range(1, 256) if v != mask][:maximum-1]
+        result = console.piret.recover_sm4_master_key(correct, oracle, masks, start_byte, observer=show)
+    complete, recovered = result['complete'], result['master_key']
+    if complete and (recovered != key or sm4.sm4_encrypt_block(block, recovered) != correct):
+        raise RuntimeError("SM4 full master-key verification failed.")
+    keys = {str(r): f"{value:08X}" for r, value in result['round_keys'].items()}
+    detail = "DFA-recovered subkeys: " + str(keys)
+    detail += f"\nMaster key: {recovered.hex()}\nVerification: PASS" if complete else f"\nAmbiguous at round {result['blocked_round']}. Increase observations."
+    steps.append(snapshot(28, "Recovered SM4 master key" if complete else "Ambiguous recovery", "All four final subkeys come from fault observations, not reference values. Reverse the schedule after uniqueness.", correct, detail))
+    first_faulty = result['history'][0]['faulty'] if result['history'] else correct.hex()
+    return dict(steps=steps, output=first_faulty, correct=correct.hex(), recovered_key=None if recovered is None else recovered.hex(), recovered_subkey=keys.get('31'), recovered_round_keys=keys, used=result['used'], history=result['history'], remaining_candidates=[result['candidate_counts'].get(f"{r}:{b}",256) for r in range(31,27,-1) for b in range(4)], verified=complete, model=model, known_bit=known_bit, fault=dict(row=start_byte, mask=mask, maximum=maximum))
+
+
+def pdf_sm4_lesson(block, key, start_byte, mask, maximum):
+    """Controlled-byte PDF model extended to four target rounds."""
+    return sm4_master_lesson(block, key, start_byte, mask, maximum)
+
+
+# Giraud target simulation and visual explanations belong to this GUI module.
+
+def aes_giraud_encrypt(plaintext, key, byte=0, mask=None):
+    """GUI adapter only; giraud.py performs the external cipher intervention."""
+    return giraud.aes_fault_encrypt(plaintext, key, byte, mask)
+
+
+def giraud_lesson(algorithm, plaintext, key, row=0, column=0, mask=1, maximum=8, known_bit=False):
+    """Build the GUI's visual steps under the chapter-7 fault models.
+
+    Coordinates choose which byte is demonstrated first; all target bytes are
+    processed. A unique candidate is required before a recovered value is used.
+    """
+    if algorithm not in ('AES-128', 'SM4') or not 0 <= row < 4 or (not 0 <= column < 4):
+        raise ValueError('Choose AES-128 or SM4, with row/column in 0..3.')
+    aes.validate_block(plaintext)
+    aes.validate_block(key, 'Key')
+    masks = giraud.masks_for(mask, maximum)
+    if algorithm == 'SM4':
+        return sm4_master_lesson(plaintext, key, row, mask, maximum, True, known_bit)
+    count = 16
+    first = 4 * column + row
+    correct, clean_trace = aes_giraud_encrypt(plaintext, key)
+    if correct != console.piret.aes_target_encrypt(plaintext, key):
+        raise RuntimeError('AES simulator differs from aes.py.')
+    steps = [snapshot(10, 'Giraud fault model', 'One bit before the last nonlinear layer. The bit is ' + ('KNOWN' if known_bit else 'UNKNOWN') + ' to the candidate solver.', correct, 'AES: no final MixColumns; one altered output byte.\nSM4 adaptation: invert L to isolate one S-box output difference.\nPDF chapter 7. Target location is not sufficient to identify the bit.\nThe simulator key and internal states are not solver inputs.')]
+    recovered, remaining, history = (bytearray(count), [256] * count, [])
+    used, first_faulty = (0, None)
+    descriptions = {'Before fault': 'Clean final-round input before injection.', 'Injected bit': 'Flip exactly one bit before final SubBytes.', 'SubBytes': 'The S-box changes the difference nonlinearly, within the same byte.', 'ShiftRows': 'Move the changed byte to its final output position; no byte diffusion occurs.', 'Ciphertext': 'The final key XOR preserves the one-byte difference.'}
+    for target in [(first + offset) % count for offset in range(count)]:
         survivors = None
-        for observation, value in enumerate(masks, 1):
-            faulty, faulty_trace = console.sm4_encrypt(block, key, byte, value)
-            first_faulty = first_faulty or faulty
+        for observation, actual_mask in enumerate(masks, 1):
+            faulty, fault_trace = aes_giraud_encrypt(plaintext, key, target, actual_mask)
+            position, fresh = giraud.aes_candidates(correct, faulty, actual_mask if known_bit else None)
+            input_column, input_row = divmod(target, 4)
+            expected = 4 * ((input_column - input_row) % 4) + input_row
+            if position != expected:
+                raise RuntimeError('Final ShiftRows output mapping is inconsistent.')
+            detail = f'Input byte {target}: row {input_row}, column {input_column}. Output position: {position}.\nSimulator bit mask: {actual_mask:02X}. Solver knows this mask: {known_bit}.\nd(k) = InvSbox[{correct[position]:02X} XOR k] XOR InvSbox[{faulty[position]:02X} XOR k]\n' + (f'Require d(k) = {actual_mask:02X}.' if known_bit else 'Require Hamming weight of d(k) = 1; test all eight bit positions.')
+            if observation == 1:
+                for name, state in fault_trace.items():
+                    steps.append(snapshot(10, f'Input byte {target} / {name}', descriptions[name], state, detail, clean_trace[name]))
             used += 1
-            fresh, inputs, delta = console.sm4_byte_candidates(correct, faulty, byte, value)
+            first_faulty = first_faulty or faulty
             before = 256 if survivors is None else len(survivors)
-            survivors = fresh if survivors is None else survivors & fresh
-            if not survivors:
-                raise ValueError("No compatible SM4 key-byte candidates.")
-            history.append((observation, byte, len(fresh), len(survivors)))
-            for name, field in [("S-box input A", "a"), ("S-box output B", "b")]:
-                clean_word, faulty_word = clean_trace[-1][field], faulty_trace[-1][field]
-                # Place the scalar in W0 and pad W1-W3 with zeros for the common viewer.
-                state, reference = faulty_word.to_bytes(4, "big") + bytes(12), clean_word.to_bytes(4, "big") + bytes(12)
-                steps.append(snapshot(31, f"Byte {byte} / {name}", "Teacher view: only row W0 contains this scalar word; W1-W3 are zero placeholders.", state, f"Known fault mask: {value:02X}\nClean {name}: {clean_word:08X}\nFaulty {name}: {faulty_word:08X}\nThese hidden values are not passed to the solver.", reference))
-            detail = f"Known fault: byte {byte}, mask {value:02X}\nL-inverse(C0 XOR F0) = {delta:08X}\nS(a) XOR S(a XOR {value:02X}) = {(delta >> (24-8*byte)) & 255:02X}\nObserved X32 XOR X33 XOR X34 = {known:08X}\nKey guess = input guess XOR {(known >> (24-8*byte)) & 255:02X}\nInput guesses: " + " ".join(f"{a:02X}" for a in sorted(inputs)) + f"\nKey-byte intersection: {before} -> {len(survivors)}\nSurviving key bytes: " + " ".join(f"{a:02X}" for a in sorted(survivors))
-            steps.append(snapshot(31, f"Byte {byte} / observation {observation}", "Invert L from output differences, then intersect S-box input/key-byte candidates using the known XOR mask.", faulty, detail, correct))
+            survivors = giraud.intersect_candidates(survivors, fresh)
+            remaining[position] = len(survivors)
+            history.append(dict(observation=observation, target=position, before=before, pair_candidates=len(fresh), remaining=len(survivors), simulator_mask=actual_mask))
+            detail += f'\nKey-byte candidates in this pair: {len(fresh)}\nIntersection: {before} -> {len(survivors)}\nSurvivors: ' + ' '.join((f'{value:02X}' for value in sorted(survivors)))
+            steps.append(snapshot(10, f'Key byte {position} / observation {observation}', 'Intersect candidate byte values across independent single-bit observations.', faulty, detail, correct))
             if len(survivors) == 1:
-                recovered_bytes[byte] = next(iter(survivors))
+                recovered[position] = next(iter(survivors))
                 break
-        else:
-            steps.append(snapshot(31, "Ambiguous rk31", "Increase observations per byte. No unique subkey is claimed.", correct))
-            return dict(steps=steps, output=first_faulty.hex(), correct=correct.hex(), recovered_key=None, recovered_subkey=None, used=used, history=history, verified=False, model="SM4 controlled last-round DFA")
-    rk31 = int.from_bytes(recovered_bytes, "big")
-    if rk31 != clean_trace[-1]["rk"]:
-        raise RuntimeError("SM4 recovered-subkey verification failed.")
-    steps.append(snapshot(31, "DFA recovered rk31", "All four subkey bytes are unique. This DFA recovers rk31, not the complete master key.", correct, f"Recovered rk31: {rk31:08X}\nVerification: PASS"))
-    reference_keys = sm4.key_expansion(key)[28:31]
-    conditional_key = console.reverse_sm4(reference_keys + [rk31])
-    if conditional_key != key or console.sm4_encrypt(block, conditional_key)[0] != correct:
-        raise RuntimeError("Conditional SM4 schedule verification failed.")
-    steps.append(snapshot(31, "Conditional master-key reversal", "PDF chapter 6: rk28..rk30 are supplied reference keys. They were NOT recovered by the DFA.", correct, "Reference rk28..rk30: " + " ".join(f"{v:08X}" for v in reference_keys) + f"\nDFA-recovered rk31: {rk31:08X}\nMaster key using reference keys: {conditional_key.hex()}\nVerification: PASS"))
-    return dict(steps=steps, output=first_faulty.hex(), correct=correct.hex(), recovered_key=None, recovered_subkey=f"{rk31:08X}", conditional_master_key=conditional_key.hex(), reference_subkeys=[f"{v:08X}" for v in reference_keys], used=used, history=history, verified=True, model="SM4 controlled last-round DFA")
+    unique = all((value == 1 for value in remaining))
+    report = dict(steps=steps, output=first_faulty.hex(), correct=correct.hex(), recovered_key=None, recovered_subkey=None, used=used, history=history, remaining_candidates=remaining, verified=unique, model='Giraud AES / final SubBytes', known_bit=known_bit, fault=dict(row=row, column=column, mask=mask, maximum=maximum))
+    if not unique:
+        steps.append(snapshot(10, 'Ambiguous recovery', 'Additional independent observations are required. No unique key is claimed.', correct, f'Candidate counts by output key byte: {remaining}\nAt most eight distinct bit faults are available for a fixed state.'))
+        return report
+    master = console.piret.reverse_key_schedule(recovered)
+    if master != key or console.piret.aes_target_encrypt(plaintext, master) != correct:
+        raise RuntimeError('Giraud AES recovered-key verification failed.')
+    report.update(recovered_key=master.hex(), recovered_last_key=recovered.hex())
+    detail = f'Recovered K10: {recovered.hex()}\nRecovered K0: {master.hex()}\nRe-encryption and target-key checks: PASS'
+    explanation = 'All 16 K10 bytes are unique. Reverse the AES-128 key schedule to recover K0.'
+    steps.append(snapshot(10, 'Verified recovery result', explanation, correct, detail + f'\nUsed {used} faulty outputs.'))
+    return report
 
 
 class CryptoLab:
@@ -290,6 +294,7 @@ class CryptoLab:
         self.key, self.value = tk.StringVar(value=AES_KEY), tk.StringVar(value=AES_INPUT)
         self.row, self.column = tk.IntVar(value=0), tk.IntVar(value=0)
         self.mask, self.maximum = tk.StringVar(value="01"), tk.IntVar(value=6)
+        self.known_bit = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Ready · choose an algorithm and load the example")
         self.speed = tk.IntVar(value=1000)
         style = ttk.Style(root)
@@ -323,7 +328,7 @@ class CryptoLab:
         sidebar.pack(side="left", fill="y", padx=(0, 16))
         sidebar.pack_propagate(False)
         self.controls = []
-        for title, variable, values in [("Algorithm", self.algorithm, ("AES-128", "SM4")), ("Lesson", self.operation, ("Encrypt", "Decrypt", "Fault analysis"))]:
+        for title, variable, values in [("Algorithm", self.algorithm, ("AES-128", "SM4")), ("Lesson", self.operation, ("Encrypt", "Decrypt", "Fault analysis", "Giraud attack"))]:
             self.label(sidebar, title, color=MUTED).pack(anchor="w", pady=(0, 5))
             widget = ttk.Combobox(sidebar, textvariable=variable, values=values, state="readonly")
             widget.pack(fill="x", pady=(0, 14))
@@ -352,6 +357,9 @@ class CryptoLab:
             widget = tk.Entry(fault_panel, textvariable=variable, bg=CELL, fg=TEXT, insertbackground=ACCENT, relief="flat", font=("Consolas", 11))
             widget.pack(fill="x", ipady=5, pady=(3, 10))
             self.controls.append(widget)
+        self.known_bit_control = tk.Checkbutton(fault_panel, text="Giraud: exact bit known to solver", variable=self.known_bit, bg=PANEL, fg=TEXT, selectcolor=CELL, activebackground=PANEL, activeforeground=TEXT, font=("Segoe UI", 9), anchor="w")
+        self.known_bit_control.pack(fill="x", pady=(0, 5))
+        self.controls.append(self.known_bit_control)
         self.example_button = self.button(sidebar, "Load standard example", self.load_example)
         self.example_button.pack(fill="x", pady=(12, 5))
         self.run_button = self.button(sidebar, "Build lesson", self.run, True)
@@ -369,7 +377,7 @@ class CryptoLab:
         self.tabs.add(summary_tab, text="Results & reading guide")
         self.title = self.label(explorer, "Build a lesson to begin", 18, ACCENT)
         self.title.pack(anchor="w")
-        self.explanation = self.label(explorer, "Choose AES or SM4, then Encrypt, Decrypt or the AES Piret lesson.", 11, MUTED)
+        self.explanation = self.label(explorer, "Choose AES or SM4, then Encrypt, Decrypt, Fault analysis or Giraud attack.", 11, MUTED)
         self.explanation.configure(wraplength=740, justify="left")
         self.explanation.pack(fill="x", pady=(10, 12))
         self.metrics = self.label(explorer, "", 10, ORANGE)
@@ -428,15 +436,18 @@ class CryptoLab:
     def selection_changed(self, *_):
         if self.busy:
             return
-        attack = self.operation.get() == "Fault analysis"
+        is_giraud = self.operation.get() == "Giraud attack"
+        attack = self.operation.get() in ("Fault analysis", "Giraud attack")
         is_sm4 = self.algorithm.get() == "SM4"
-        self.controls[1].configure(values=("Encrypt", "Decrypt", "Fault analysis"))
-        self.fault_title.configure(text="SM4 DFA / round 31 / S-box input" if is_sm4 else "AES Piret / round 9 / MixColumns")
-        self.hint.configure(text=("Known XOR fault: recover rk31. Master-key reversal also uses three reference subkeys." if is_sm4 else "Piret recovers all four AES key groups. Row selects the fault row; all columns are processed.") if attack else "One raw 16-byte block. Decrypt expects ciphertext; no text padding is applied.")
+        self.controls[1].configure(values=("Encrypt", "Decrypt", "Fault analysis", "Giraud attack"))
+        self.fault_title.configure(text=("SM4 single-bit / round 31" if is_sm4 else "AES Giraud / final SubBytes") if is_giraud else "SM4 DFA / round 31 / S-box input" if is_sm4 else "AES Piret / round 9 / MixColumns")
+        message = ("Single-bit SM4: recover rk31 through rk28, then the full master key." if is_sm4 else "Single bit before final SubBytes. Filter K10 bytes with HW(delta)=1. Unknown bit by default.") if is_giraud else ("Known XOR faults in rounds 31 through 28 recover the full SM4 master key." if is_sm4 else "Piret recovers all four AES key groups. Row selects the fault row; all columns are processed.")
+        self.hint.configure(text=message if attack else "One raw 16-byte block. Decrypt expects ciphertext; no text padding is applied.")
         for widget in self.controls[4:]:
             widget.configure(state="readonly" if attack and isinstance(widget, ttk.Combobox) else "normal" if attack else "disabled")
         if is_sm4:
             self.controls[5].configure(state="disabled")
+        self.known_bit_control.configure(state="normal" if is_giraud else "disabled")
         if self.report:
             self.status.set("Settings changed · Build lesson to apply. Timeline retains its original inputs.")
 
@@ -460,12 +471,14 @@ class CryptoLab:
         self.stop()
         try:
             key, block = parse_block(self.key.get()), parse_block(self.value.get())
-            attack = self.operation.get() == "Fault analysis"
+            attack = self.operation.get() in ("Fault analysis", "Giraud attack")
             row, column, mask, maximum = 0, 0, 1, 6
             if attack:
                 row, column, mask, maximum = self.row.get(), self.column.get(), int(self.mask.get(), 16), self.maximum.get()
                 if not (0 <= row < 4 and 0 <= column < 4 and 1 <= mask <= 255 and 1 <= maximum <= 20):
                     raise ValueError("Fault settings: row/column 0..3, mask 01..FF, observations 1..20.")
+                if self.operation.get() == "Giraud attack":
+                    giraud.masks_for(mask, maximum)
         except (ValueError, tk.TclError) as error:
             messagebox.showerror("Invalid input", str(error), parent=self.root)
             return
@@ -477,11 +490,13 @@ class CryptoLab:
         self.run_button.configure(state="disabled", text="Computing…")
         self.example_button.configure(state="disabled")
         self.status.set("Building the lesson and checking its result…")
-        threading.Thread(target=self.compute, args=(algorithm, operation, key, block, row, column, mask, maximum), daemon=True).start()
+        threading.Thread(target=self.compute, args=(algorithm, operation, key, block, row, column, mask, maximum, self.known_bit.get()), daemon=True).start()
 
-    def compute(self, algorithm, operation, key, block, row, column, mask, maximum):
+    def compute(self, algorithm, operation, key, block, row, column, mask, maximum, known_bit=False):
         try:
-            if operation == "Fault analysis":
+            if operation == "Giraud attack":
+                report = giraud_lesson(algorithm, block, key, row, column, mask, maximum, known_bit)
+            elif operation == "Fault analysis":
                 report = pdf_sm4_lesson(block, key, row, mask, maximum) if algorithm == "SM4" else pdf_aes_lesson(block, key, row, column, mask, maximum)
                 report.update(fault=dict(row=row, column=column, mask=mask, maximum=maximum))
             else:
@@ -602,12 +617,14 @@ class CryptoLab:
     def fill_summary(self):
         report = self.report
         lines = [report["algorithm"] + " / " + report["operation"], "", "Input:  " + report["input"], "Key:    " + report["key"], "Output: " + report["output"], ""]
-        if report["operation"] == "Fault analysis":
+        if report["operation"] in ("Fault analysis", "Giraud attack"):
             lines.extend(["Model: " + report["model"], "Correct ciphertext: " + report["correct"], f"Faulty observations consumed: {report['used']}", ""])
             if report["algorithm"] == "SM4":
-                lines.extend(["DFA-recovered rk31: " + str(report.get("recovered_subkey")), "Master key using reference rk28..rk30: " + str(report.get("conditional_master_key")), "Only rk31 is recovered by the DFA; the other three keys are references."])
+                lines.extend(["DFA-recovered subkeys: " + str(report.get("recovered_round_keys")), "DFA-recovered master key: " + str(report.get("recovered_key")), "All four final subkeys came from observations, not references."])
             else:
-                lines.extend(["DFA-recovered master key: " + str(report["recovered_key"]), "Round-9 faults affect one key quartet at a time. All four groups are processed."])
+                lines.extend(["DFA-recovered master key: " + str(report["recovered_key"]), "Single-bit faults before final SubBytes filter all 16 K10 bytes." if report["operation"] == "Giraud attack" else "Round-9 faults affect one key quartet at a time. All four groups are processed."])
+            if report["operation"] == "Giraud attack":
+                lines.extend(["Exact bit known to solver: " + str(report["known_bit"]), "Remaining candidates per key byte: " + str(report["remaining_candidates"]), "SM4 is an adaptation of Giraud's filtering idea, not the unchanged AES attack."])
             lines.extend(["", "Red highlights show all fault-modified bytes and XOR differences.", "No unique key is claimed when candidates remain ambiguous."])
 
         else:

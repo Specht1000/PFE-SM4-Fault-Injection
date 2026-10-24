@@ -1,4 +1,4 @@
-"""AES-128 primitives and a visible, single-block encryption lesson.
+"""Normal AES-128 encryption and decryption, with reusable round primitives.
 
 Author: Guilherme Martins Specht / PFE 5A / Polytech Montpellier.
 Academic and industrial context: STMicroelectronics.
@@ -10,13 +10,14 @@ The state is stored as state[row][column]. Input and output bytes are serialized
 column by column: byte_index = 4 * column + row. Round transformations modify
 this matrix in place; conversion functions produce independent containers.
 
-Importing the module does not run the lesson. Terminal, GUI and DFA tools reuse
-the same primitives. This file handles one raw block, without padding or modes.
+Normal block functions return bytes without printing or pausing. External tools
+may attach an observer for tracing or fault experiments; no fault rule is part
+of this cipher. main() runs ordinary encryption/decryption on one raw block.
 """
 
 
 # ============================================================================
-# 1. EDITABLE EXAMPLE AND DISPLAY SETTINGS
+# 1. EDITABLE EXAMPLE INPUTS AND ALGORITHM CONSTANTS
 # ============================================================================
 
 
@@ -24,14 +25,6 @@ KEY = "000102030405060708090A0B0C0D0E0F"
 
 
 PLAINTEXT = "00112233445566778899AABBCCDDEEFF"
-
-
-# True pauses after each operation; False runs without waiting for input.
-STEP_BY_STEP = True
-
-
-# True prints the finite-field products for the first MixColumns column.
-SHOW_CALCULATIONS = True
 
 
 BLOCK_SIZE = 16
@@ -95,6 +88,9 @@ MIX_MATRIX = [
     [1, 1, 2, 3],
     [3, 1, 1, 2]
 ]
+
+INV_SBOX = tuple(SBOX.index(value) for value in range(256))
+INV_MIX_MATRIX = ((14, 11, 13, 9), (9, 14, 11, 13), (13, 9, 14, 11), (11, 13, 9, 14))
 
 
 # ============================================================================
@@ -194,22 +190,11 @@ def mix_column(column):
 
 
 def mix_columns(state):
-    """Mix all four columns in place and optionally explain the first column."""
-    for col in range(4):
-        original = [state[row][col] for row in range(4)]
-        result = mix_column(original)
-
-        if SHOW_CALCULATIONS and col == 0:
-            print("\nMixColumns - First column example:")
-            print("Input:", [f"{x:02X}" for x in original])
-
-            for row in range(4):
-                terms = [f"{MIX_MATRIX[row][k]:02X}*{original[k]:02X}" for k in range(4)]
-
-                print(f"b{row} = {' XOR '.join(terms)} = {result[row]:02X}")
-
+    """Mix each column in place; the normal algorithm never prints output."""
+    for column in range(4):
+        mixed = mix_column([state[row][column] for row in range(4)])
         for row in range(4):
-            state[row][col] = result[row]
+            state[row][column] = mixed[row]
 
 
 def add_round_key(state, round_key):
@@ -275,163 +260,88 @@ def key_expansion(key):
 
 
 # ============================================================================
-# 7. TERMINAL PRESENTATION HELPERS
+# 7. NORMAL ENCRYPTION / DECRYPTION AND OPTIONAL EXTERNAL OBSERVATION
 # ============================================================================
 
 
-def pause():
-    """Pause only when the standalone teaching mode requests user interaction."""
-    if STEP_BY_STEP:
-        input("\nPress ENTER to continue...")
+def _operation(state, number, name, transform, observer):
+    """Optional instrumentation surrounds a normal transformation.
 
-
-def print_state(state, title):
-    """Display rows horizontally, even though byte serialization is column-major."""
-    print(f"\n{title}")
-    print("-" * 35)
-
-    for row in range(4):
-        print("   " + "  ".join(f"{state[row][col]:02X}" for col in range(4)))
-
-
-def print_separator(round_number):
-    """Make round boundaries visible without changing the encryption state."""
-    print("\n" + "=" * 55)
-    print(f"                 ROUND {round_number}")
-    print("=" * 55)
-
-
-# ============================================================================
-# 8. COMPLETE SINGLE-BLOCK ENCRYPTION LESSON
-# ============================================================================
-
-
-def aes_encrypt(plaintext, key):
-    """Encrypt one block while displaying each operation in execution order.
-
-    The initial key XOR is round 0. Rounds 1..9 have all four operations;
-    round 10 intentionally omits MixColumns. The input bytes are not mutated.
+    The cipher contains no fault rules. An external experiment may inspect or
+    change the state in its observer. Without an observer this is ordinary AES.
     """
+    if observer is not None:
+        observer(number, "Before " + name, state)
+    transform(state)
+    if observer is not None:
+        observer(number, "After " + name, state)
+
+
+def aes_encrypt(plaintext, key, observer=None):
+    """Encrypt one raw block. No printing, pauses or built-in fault injection."""
     state = bytes_to_state(plaintext)
-    round_keys = key_expansion(key)
-
-    print("\nINITIAL PLAINTEXT")
-    print_state(state, "Initial State")
-    pause()
-
-    # --------------------------------------------------------
-    # ROUND 0
-    # --------------------------------------------------------
-
-    print_separator(0)
-
-    print_state(round_keys[0], "Initial Round Key")
-
-    add_round_key(state, round_keys[0])
-    print_state(state, "After AddRoundKey")
-
-    pause()
-
-    # --------------------------------------------------------
-    # ROUNDS 1 TO 9
-    # --------------------------------------------------------
-
-    for round_number in range(1, N_ROUNDS):
-        print_separator(round_number)
-
-        print("\n[1] SUBBYTES")
-        sub_bytes(state)
-        print_state(state, "After SubBytes")
-        pause()
-
-        print("\n[2] SHIFTROWS")
-        shift_rows(state)
-        print_state(state, "After ShiftRows")
-        pause()
-
-        print("\n[3] MIXCOLUMNS")
-        mix_columns(state)
-        print_state(state, "After MixColumns")
-        pause()
-
-        print("\n[4] ADDROUNDKEY")
-        print_state(round_keys[round_number], f"Round Key {round_number}")
-
-        add_round_key(state, round_keys[round_number])
-
-        print_state(state, "After AddRoundKey")
-        pause()
-
-    # --------------------------------------------------------
-    # ROUND 10 - NO MIXCOLUMNS
-    # --------------------------------------------------------
-
-    print_separator(N_ROUNDS)
-
-    print("\n[1] SUBBYTES")
-    sub_bytes(state)
-    print_state(state, "After SubBytes")
-    pause()
-
-    print("\n[2] SHIFTROWS")
-    shift_rows(state)
-    print_state(state, "After ShiftRows")
-    pause()
-
-    print("\n[3] ADDROUNDKEY")
-    print("\nNOTE: The last AES round has no MixColumns.")
-
-    print_state(round_keys[N_ROUNDS], "Final Round Key")
-
-    add_round_key(state, round_keys[N_ROUNDS])
-    print_state(state, "Final State")
-
+    keys = key_expansion(key)
+    _operation(state, 0, "AddRoundKey", lambda s: add_round_key(s, keys[0]), observer)
+    for number in range(1, N_ROUNDS + 1):
+        _operation(state, number, "SubBytes", sub_bytes, observer)
+        _operation(state, number, "ShiftRows", shift_rows, observer)
+        if number != N_ROUNDS:
+            _operation(state, number, "MixColumns", mix_columns, observer)
+        _operation(state, number, "AddRoundKey", lambda s: add_round_key(s, keys[number]), observer)
     return state_to_bytes(state)
 
 
-# ============================================================================
-# 9. STANDALONE ENTRY POINT
-# ============================================================================
+def inv_sub_bytes(state):
+    """Undo byte substitution with the inverse table."""
+    for row in range(4):
+        for column in range(4):
+            state[row][column] = INV_SBOX[state[row][column]]
+
+
+def inv_shift_rows(state):
+    """Undo row r by rotating it right by r positions."""
+    for row in range(1, 4):
+        state[row] = state[row][-row:] + state[row][:-row]
+
+
+def inv_mix_columns(state):
+    """Multiply each column by the inverse diffusion matrix in GF(2^8)."""
+    for column in range(4):
+        original = [state[row][column] for row in range(4)]
+        for row in range(4):
+            value = 0
+            for index in range(4):
+                value ^= gf_mul(INV_MIX_MATRIX[row][index], original[index])
+            state[row][column] = value
+
+
+def aes_decrypt(ciphertext, key, observer=None):
+    """Decrypt one raw block by reversing operations and round-key order."""
+    state = bytes_to_state(ciphertext)
+    keys = key_expansion(key)
+    _operation(state, N_ROUNDS, "AddRoundKey", lambda s: add_round_key(s, keys[N_ROUNDS]), observer)
+    for number in range(N_ROUNDS - 1, -1, -1):
+        _operation(state, number, "InvShiftRows", inv_shift_rows, observer)
+        _operation(state, number, "InvSubBytes", inv_sub_bytes, observer)
+        _operation(state, number, "AddRoundKey", lambda s: add_round_key(s, keys[number]), observer)
+        if number:
+            _operation(state, number, "InvMixColumns", inv_mix_columns, observer)
+    return state_to_bytes(state)
 
 
 def main():
-    """Read the editable example configuration and run its known-answer check."""
-    key = bytes.fromhex(KEY)
-    plaintext = bytes.fromhex(PLAINTEXT)
-
-    if len(key) != 16:
-        raise ValueError("AES-128 key must contain 16 bytes.")
-
-    if len(plaintext) != 16:
-        raise ValueError("Plaintext must contain 16 bytes.")
-
-    print("=" * 55)
-    print("            AES-128 EDUCATIONAL DEMO")
-    print("=" * 55)
-
-    print("\nKEY       :", key.hex().upper())
-    print("PLAINTEXT :", plaintext.hex().upper())
-
+    """Run normal AES encryption and decryption using the configured inputs."""
+    key, plaintext = bytes.fromhex(KEY), bytes.fromhex(PLAINTEXT)
     ciphertext = aes_encrypt(plaintext, key)
-
-    print("\n" + "=" * 55)
-    print("               FINAL RESULT")
-    print("=" * 55)
-
-    print("\nPLAINTEXT :", plaintext.hex().upper())
-    print("KEY       :", key.hex().upper())
-    print("CIPHERTEXT:", ciphertext.hex().upper())
-
-    # Official AES-128 known-answer test
-    if (KEY.upper() == "000102030405060708090A0B0C0D0E0F" and PLAINTEXT.upper() == "00112233445566778899AABBCCDDEEFF"):
-        expected = "69C4E0D86A7B0430D8CDB78070B4C55A"
-
-        print("\nEXPECTED  :", expected)
-
-        if ciphertext.hex().upper() == expected:
-            print("TEST RESULT: PASS")
-        else:
-            print("TEST RESULT: FAIL")
+    recovered = aes_decrypt(ciphertext, key)
+    print("AES-128")
+    print("Key:        " + key.hex().upper())
+    print("Plaintext:  " + plaintext.hex().upper())
+    print("Ciphertext: " + ciphertext.hex().upper())
+    print("Recovered:  " + recovered.hex().upper())
+    if recovered != plaintext:
+        raise RuntimeError("AES round-trip verification failed.")
+    print("Round-trip verification: PASS")
 
 
 if __name__ == "__main__":

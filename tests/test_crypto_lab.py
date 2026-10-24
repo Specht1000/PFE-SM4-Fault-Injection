@@ -17,7 +17,7 @@ if GUI:
 
 
 class CryptoTests(unittest.TestCase):
-    def test_direct_sm4_block_api_and_reverse_key_display(self):
+    def test_direct_sm4_block_api_is_quiet(self):
         from contextlib import redirect_stdout
         import io
         rng = random.Random(32)
@@ -30,10 +30,7 @@ class CryptoTests(unittest.TestCase):
                 recovered = lab.sm4.sm4_decrypt_block(ciphertext, key)
             self.assertEqual(recovered, block)
             self.assertEqual(ciphertext, lab.sm4_trace(block, key)[0])
-            lines = output.getvalue().splitlines()
-            keys = lab.sm4.key_expansion(key)
-            self.assertIn(f"rk[31] = {keys[31]:08X}", lines[0])
-            self.assertIn(f"rk[0] = {keys[0]:08X}", lines[-1])
+            self.assertEqual(output.getvalue(), "")
         with self.assertRaises(ValueError):
             lab.sm4.key_expansion(b"short")
         with self.assertRaises(ValueError):
@@ -87,9 +84,9 @@ class CryptoTests(unittest.TestCase):
         result = lab.pdf_sm4_lesson(key, key, 0, 1, 6)
         self.assertTrue(result["verified"])
         self.assertEqual(result["recovered_subkey"], "9124A012")
-        self.assertIsNone(result["recovered_key"])
-        self.assertEqual(result["conditional_master_key"], key.hex())
-        self.assertEqual(len(result["reference_subkeys"]), 3)
+        self.assertEqual(result["recovered_key"], key.hex())
+        self.assertEqual(set(result["recovered_round_keys"]), {"28", "29", "30", "31"})
+        self.assertNotIn("reference_subkeys", result)
         result = lab.pdf_sm4_lesson(key, key, 0, 1, 1)
         self.assertFalse(result["verified"])
         self.assertIsNone(result["recovered_subkey"])
@@ -105,7 +102,7 @@ class CryptoTests(unittest.TestCase):
         errors = []
         root.report_callback_exception = lambda *args: errors.append(args)
         try:
-            for algorithm, operation in [("AES-128", "Encrypt"), ("AES-128", "Decrypt"), ("SM4", "Encrypt"), ("SM4", "Decrypt"), ("AES-128", "Fault analysis"), ("SM4", "Fault analysis")]:
+            for algorithm, operation in [("AES-128", "Encrypt"), ("AES-128", "Decrypt"), ("SM4", "Encrypt"), ("SM4", "Decrypt"), ("AES-128", "Fault analysis"), ("SM4", "Fault analysis"), ("AES-128", "Giraud attack"), ("SM4", "Giraud attack")]:
                 app.algorithm.set(algorithm)
                 app.operation.set(operation)
                 app.load_example()
@@ -131,7 +128,15 @@ class CryptoTests(unittest.TestCase):
                     app.export()
                 self.assertEqual(json.loads(Path(target).read_text())["recovered_subkey"], "9124A012")
             app.algorithm.set("SM4")
-            self.assertEqual(app.operation.get(), "Fault analysis")
+            self.assertEqual(app.operation.get(), "Giraud attack")
+            app.known_bit.set(True)
+            app.run()
+            deadline = time.monotonic() + 10
+            while app.busy and time.monotonic() < deadline:
+                root.update()
+                time.sleep(0.01)
+            self.assertTrue(app.report["known_bit"])
+            self.assertTrue(app.report["verified"])
         finally:
             app.close()
 

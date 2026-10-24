@@ -99,15 +99,28 @@ def sbox(a: int) -> int:
 # ============================================================================
 
 
-def round(x: list[int], rk: int):
+def observe(observer, number, operation, value):
+    """Optional experiment callback. Normal cipher calls have no observer.
+
+    An observer may return a replacement value, or None to leave it unchanged.
+    Fault coordinates and masks belong to the external attack, never this file.
+    """
+    if observer is None:
+        return value
+    replacement = observer(number, operation, value)
+    return value if replacement is None else replacement
+
+
+def round(x: list[int], rk: int, observer=None, round_index=0):
     """Return the next rolling window without modifying the supplied words.
 
     A = X[i+1] XOR X[i+2] XOR X[i+3] XOR rk[i]
     X[i+4] = X[i] XOR L(tau(A))
     """
-    sbox_input = x[1] ^ x[2] ^ x[3] ^ rk
-    substituted = sbox(sbox_input)
-    new_word = x[0] ^ linear(substituted)
+    sbox_input = observe(observer, round_index, "Sbox input", x[1] ^ x[2] ^ x[3] ^ rk)
+    substituted = observe(observer, round_index, "Sbox output", sbox(sbox_input))
+    diffused = observe(observer, round_index, "Linear output", linear(substituted))
+    new_word = observe(observer, round_index, "New word", x[0] ^ diffused)
     return x[1], x[2], x[3], new_word
 
 
@@ -146,8 +159,8 @@ def key_expansion(key: bytes) -> list[int]:
 # ============================================================================
 
 
-def sm4_process_block(block: bytes, key: bytes, encrypt: bool) -> bytes:
-    """Process a single block, printing the new word and actual key each round.
+def sm4_process_block(block: bytes, key: bytes, encrypt: bool, observer=None) -> bytes:
+    """Process a normal single block, without printing or built-in faults.
 
     The final four-word reversal is part of SM4, not a byte-endianness change.
     Reversing only the key order is sufficient to run the inverse cipher.
@@ -158,19 +171,21 @@ def sm4_process_block(block: bytes, key: bytes, encrypt: bool) -> bytes:
     round_keys = key_expansion(key)
     for i in range(N_ROUNDS):
         key_index = i if encrypt else N_ROUNDS - 1 - i
-        state = list(round(state, round_keys[key_index]))
-        print(f"x[{i+4}] = {state[3]:08X}\trk[{key_index}] = {round_keys[key_index]:08X}")
-    return struct.pack(">4I", *state[::-1])
+        state = list(observe(observer, i, "State input", tuple(state)))
+        state = list(round(state, round_keys[key_index], observer, i))
+        state = list(observe(observer, i, "State output", tuple(state)))
+    output = struct.pack(">4I", *state[::-1])
+    return observe(observer, N_ROUNDS, "Ciphertext", output)
 
 
-def sm4_encrypt_block(x: bytes, key: bytes) -> bytes:
+def sm4_encrypt_block(x: bytes, key: bytes, observer=None) -> bytes:
     """Encrypt one 16-byte block using round keys in forward order."""
-    return sm4_process_block(x, key, encrypt=True)
+    return sm4_process_block(x, key, encrypt=True, observer=observer)
 
 
-def sm4_decrypt_block(x: bytes, key: bytes) -> bytes:
+def sm4_decrypt_block(x: bytes, key: bytes, observer=None) -> bytes:
     """Decrypt one 16-byte block using the identical round function."""
-    return sm4_process_block(x, key, encrypt=False)
+    return sm4_process_block(x, key, encrypt=False, observer=observer)
 
 
 # ============================================================================

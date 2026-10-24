@@ -60,7 +60,7 @@ class PiretTerminalTests(unittest.TestCase):
     def test_main_reads_changed_aes_configuration(self):
         key = "102132435465768798a9bacbdcedfe0f"
         output = io.StringIO()
-        flags = aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS
+        configuration = aes.KEY, aes.PLAINTEXT
         with patch.object(aes, "KEY", key), patch.object(aes, "PLAINTEXT", "ffeeddccbbaa99887766554433221100"), patch("builtins.input", return_value=""), redirect_stdout(output):
             status = piret.main(["--step", "--color", "never"])
         text = output.getvalue()
@@ -68,7 +68,7 @@ class PiretTerminalTests(unittest.TestCase):
         self.assertIn("Recovered K0: " + key.upper(), text)
         self.assertIn("KEY RECOVERY: PASS", text)
         self.assertNotIn("\033[", text)
-        self.assertEqual((aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS), flags)
+        self.assertEqual((aes.KEY, aes.PLAINTEXT), configuration)
 
     def test_cli_ambiguity_and_colors(self):
         output = io.StringIO()

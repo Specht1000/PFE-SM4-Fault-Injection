@@ -18,14 +18,15 @@ Run: python src/piret.py --step
 
 
 import argparse
-from contextlib import redirect_stdout
-import io
 from itertools import product
+from functools import lru_cache
+import sm4
+import struct
 import os
 import random
 import sys
 import aes
-from aes import bytes_to_state, state_to_bytes, key_expansion, sub_bytes, shift_rows, mix_columns, add_round_key, SBOX
+from aes import bytes_to_state, state_to_bytes, key_expansion, SBOX
 
 
 # ============================================================================
@@ -123,45 +124,49 @@ def reverse_last_round_difference(correct_ciphertext, faulty_ciphertext, last_ro
 
 
 def encrypt_with_trace(plaintext, key, row=0, column=0, mask=0, fault_round=8):
-    """Simulator only: XOR a byte before selected round-8/9 MixColumns.
+    """Run aes.py itself; this external observer injects and records the fault.
 
-    Round 8 lets one fault propagate into all four final-round key groups.
-    Round 9 constrains one group; the PDF runner repeats across all columns.
-    mask=0 records a clean execution at the same labeled injection point.
-    Snapshots are immutable bytes, so later operations cannot overwrite them.
+    Round 8 spreads to four key groups. Round 9 reaches one key quartet.
+    No second AES implementation is used by the attacker.
     """
-    if len(plaintext) != 16 or len(key) != 16:
-        raise ValueError("AES-128 requires a 16-byte key and plaintext.")
-    if not (0 <= row < 4 and 0 <= column < 4 and 0 <= mask <= 255):
-        raise ValueError("Fault coordinates must be 0..3 and mask 0..255.")
-    if fault_round not in (8, 9):
-        raise ValueError("Fault round must be 8 or 9.")
-    state, keys, trace = bytes_to_state(plaintext), key_expansion(key), []
+    if not (0 <= row < 4 and 0 <= column < 4 and 0 <= mask <= 255 and fault_round in (8, 9)):
+        raise ValueError("Fault: row/column 0..3, mask 0..255, round 8 or 9.")
+    trace = []
 
-    def record(number, operation):
-        # Serialize now: retaining a reference to state would corrupt old steps.
-        trace.append((number, operation, state_to_bytes(state)))
-
-    add_round_key(state, keys[0])
-    for number in range(1, 11):
-        sub_bytes(state)
-        record(number, "SubBytes")
-        shift_rows(state)
-        record(number, "ShiftRows")
-        if number == fault_round:
-            # One transient data fault: do not modify key material or the S-box.
+    def observer(number, operation, state):
+        if number == fault_round and operation == "Before MixColumns":
             state[row][column] ^= mask
-            record(number, "Fault point")
-        if number != 10:
-            # Use the pure single-column AES helper to avoid presentation prints.
-            for col in range(4):
-                mixed = aes.mix_column([state[r][col] for r in range(4)])
-                for r in range(4):
-                    state[r][col] = mixed[r]
-            record(number, "MixColumns")
-        add_round_key(state, keys[number])
-        record(number, "AddRoundKey")
-    return state_to_bytes(state), trace
+            trace.append((number, "Fault point", aes.state_to_bytes(state)))
+        if number > 0 and operation.startswith("After "):
+            trace.append((number, operation[6:], aes.state_to_bytes(state)))
+
+    ciphertext = aes.aes_encrypt(plaintext, key, observer=observer)
+    return ciphertext, trace
+
+
+def sm4_fault_encrypt(plaintext, key, byte=None, mask=0, fault_round=31):
+    """Run sm4.py with an external S-box-input XOR in a selected round.
+
+    This PDF model assumes a controlled known byte fault. Giraud restricts the
+    mask to a single bit before reusing this target adapter.
+    """
+    if byte is not None and not (0 <= byte < 4 and 1 <= mask <= 255):
+        raise ValueError("SM4 fault requires byte 0..3 and mask 1..255.")
+    if not 0 <= fault_round < 32:
+        raise ValueError("SM4 fault round must be 0..31.")
+    keys = sm4.key_expansion(key)
+    trace = [dict(round=i, rk=keys[i]) for i in range(32)]
+    fields = {"Sbox input": "a", "Sbox output": "b", "Linear output": "linear", "New word": "new"}
+
+    def observer(number, operation, value):
+        if number == fault_round and operation == "Sbox input" and byte is not None:
+            value ^= mask << (24 - 8 * byte)
+        if operation in fields:
+            trace[number][fields[operation]] = value
+        return value
+
+    ciphertext = sm4.sm4_encrypt_block(plaintext, key, observer=observer)
+    return ciphertext, trace
 
 
 def trace_round8(plaintext, key, row=0, column=0, mask=0, fault_round=8):
@@ -188,20 +193,130 @@ def encrypt(plaintext, key, inject_fault=False):
 
 
 def aes_target_encrypt(plaintext, key):
-    """Call the actual aes.py cipher while suppressing its teaching print/pause."""
-    previous = aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS
-    try:
-        aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS = False, False
-        with redirect_stdout(io.StringIO()):
-            return aes.aes_encrypt(plaintext, key)
-    finally:
-        # Restore caller settings even if encryption or validation raises an error.
-        aes.STEP_BY_STEP, aes.SHOW_CALCULATIONS = previous
+    """Normal baseline encryption, without an observer or any changed settings."""
+    return aes.aes_encrypt(plaintext, key)
 
 
 # ============================================================================
 # 5. ATTACKER VIEW: POSITION MAPPING AND KEY-CANDIDATE INTERSECTIONS
 # ============================================================================
+
+
+# SM4 DFA math: inverse diffusion, key-byte filtering and schedule reversal.
+
+@lru_cache(maxsize=1)
+def inverse_rows():
+    """Invert SM4 L's 32x32 binary matrix with Gaussian elimination."""
+    columns = [sm4.linear(1 << i) for i in range(32)]
+    rows = [sum(((columns[col] >> row) & 1) << col for col in range(32)) | (1 << (32 + row)) for row in range(32)]
+    for column in range(32):
+        pivot = next(row for row in range(column, 32) if (rows[row] >> column) & 1)
+        rows[column], rows[pivot] = rows[pivot], rows[column]
+        for row in range(32):
+            if row != column and (rows[row] >> column) & 1:
+                rows[row] ^= rows[column]
+    return tuple(row >> 32 for row in rows)
+
+
+def inverse_linear(value):
+    return sum((bin(row & value).count("1") & 1) << index for index, row in enumerate(inverse_rows()))
+
+
+def sm4_byte_candidates(correct, faulty, byte, mask):
+    """Attacker API: outputs and the PDF's KNOWN fault byte/value only."""
+    if len(correct) != 16 or len(faulty) != 16 or not 0 <= byte < 4 or not 1 <= mask <= 255:
+        raise ValueError("Invalid SM4 output or known-fault descriptor.")
+    c, f = struct.unpack(">4I", correct), struct.unpack(">4I", faulty)
+    if c[1:] != f[1:]:
+        raise ValueError("The last-round model requires three output words unchanged.")
+    delta_b = inverse_linear(c[0] ^ f[0])
+    shift = 24 - 8 * byte
+    if not delta_b or delta_b & ~(255 << shift):
+        raise ValueError("Difference does not match a single-byte S-box input fault.")
+    d = (delta_b >> shift) & 255
+    known = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+    inputs = {a for a in range(256) if sm4.SBOX[a] ^ sm4.SBOX[a ^ mask] == d}
+    return {a ^ known for a in inputs}, inputs, delta_b
+
+
+def reverse_sm4(final_keys, observer=None):
+    """Four consecutive keys rk28..rk31 are REQUIRED, not merely rk31."""
+    if len(final_keys) != 4:
+        raise ValueError("SM4 reversal requires four consecutive final subkeys.")
+    words = [None] * 32 + list(final_keys)
+    for index in range(31, -1, -1):
+        value = words[index+1] ^ words[index+2] ^ words[index+3] ^ sm4.CK[index]
+        words[index] = words[index+4] ^ sm4.linear_key(sm4.sbox(value))
+        if observer:
+            observer(index, words[index])
+    return struct.pack(">4I", *(words[i] ^ sm4.FK[i] for i in range(4)))
+
+
+def peel_sm4(ciphertext, target_round, recovered_keys):
+    """Undo only rounds whose subkeys have ALREADY been recovered by DFA.
+
+    Return a reversed four-word output at the end of target_round. This lets
+    the same last-round equations analyze rounds 30, 29 and 28 in succession.
+    No reference round keys or secret intermediate values are accepted.
+    """
+    aes.validate_block(ciphertext, "SM4 ciphertext")
+    if not 28 <= target_round <= 31:
+        raise ValueError("Full SM4 recovery targets rounds 28..31.")
+    words = list(struct.unpack(">4I", ciphertext))[::-1]
+    for number in range(31, target_round, -1):
+        if number not in recovered_keys:
+            raise ValueError(f"Cannot undo round {number} before recovering its subkey.")
+        previous = words[3] ^ sm4.linear(sm4.sbox(words[0] ^ words[1] ^ words[2] ^ recovered_keys[number]))
+        words = [previous, words[0], words[1], words[2]]
+    return struct.pack(">4I", *words[::-1])
+
+
+def recover_sm4_master_key(correct, fault_oracle, masks=(1, 2, 3, 4, 5, 6, 7, 8), start_byte=0, candidate_filter=None, observer=None):
+    """Recover rk31 -> rk28 and reverse the schedule, using outputs only.
+
+    fault_oracle(round, byte, mask) returns a faulty ciphertext. It represents
+    a target capable of a controlled fault in EACH of the final four rounds.
+    The solver receives no master key, schedule, or reference subkeys.
+    The default filter uses known masks; Giraud supplies its single-bit filter.
+    """
+    aes.validate_block(correct, "Correct SM4 ciphertext")
+    masks = tuple(masks)
+    if not masks or len(set(masks)) != len(masks) or any(not 1 <= mask <= 255 for mask in masks) or not 0 <= start_byte < 4:
+        raise ValueError("Use distinct nonzero byte masks and start_byte 0..3.")
+    keys, history, counts, used = {}, [], {}, 0
+    for number in range(31, 27, -1):
+        clean_view = peel_sm4(correct, number, keys)
+        subkey = bytearray(4)
+        for byte in [(start_byte + offset) % 4 for offset in range(4)]:
+            survivors = None
+            for observation, mask in enumerate(masks, 1):
+                faulty = bytes(fault_oracle(number, byte, mask))
+                faulty_view = peel_sm4(faulty, number, keys)
+                if candidate_filter is None:
+                    fresh, inputs, delta = sm4_byte_candidates(clean_view, faulty_view, byte, mask)
+                else:
+                    position, fresh, inputs, delta = candidate_filter(clean_view, faulty_view, mask)
+                    if position != byte:
+                        raise ValueError("Fault observation does not match the requested byte.")
+                before = 256 if survivors is None else len(survivors)
+                survivors = set(fresh) if survivors is None else survivors & fresh
+                if not survivors:
+                    raise ValueError("SM4 candidate intersection is empty; fault model is incompatible.")
+                used += 1
+                counts[f"{number}:{byte}"] = len(survivors)
+                event = dict(round=number, byte=byte, observation=observation, mask=mask, before=before, pair_candidates=len(fresh), remaining=len(survivors), survivors=sorted(survivors), inputs=sorted(inputs), delta_b=delta, correct=correct.hex(), faulty=faulty.hex(), clean_view=clean_view.hex(), faulty_view=faulty_view.hex(), peeled_with={str(i): f"{value:08X}" for i, value in keys.items()})
+                history.append(event)
+                if observer is not None:
+                    observer(dict(event))
+                if len(survivors) == 1:
+                    subkey[byte] = next(iter(survivors))
+                    break
+            else:
+                return dict(master_key=None, round_keys=keys, history=history, candidate_counts=counts, used=used, complete=False, blocked_round=number)
+        keys[number] = int.from_bytes(subkey, "big")
+    master = reverse_sm4([keys[number] for number in range(28, 32)])
+    return dict(master_key=master, round_keys=keys, history=history, candidate_counts=counts, used=used, complete=True)
+
 
 
 def output_positions(column):
@@ -482,6 +597,7 @@ def main(argv=None):
     called with only outputs; known plaintext enters again during verification.
     """
     parser = argparse.ArgumentParser(description="Recover the AES-128 key configured in aes.py with a didactic Piret-style software DFA.")
+    parser.add_argument("--algorithm", choices=("aes", "sm4"), default="aes", help="Select AES Piret or the controlled SM4 DFA extension.")
     parser.add_argument("--step", action="store_true", help="Pause after each teaching stage and key-schedule round.")
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto")
     parser.add_argument("--faults", type=int, default=8, help="Maximum distinct faulty outputs (1..255).")
@@ -489,6 +605,11 @@ def main(argv=None):
     parser.add_argument("--row", type=int, choices=range(4), default=FAULT_ROW)
     parser.add_argument("--column", type=int, choices=range(4), default=FAULT_COL)
     args = parser.parse_args(argv)
+    if args.algorithm == "sm4":
+        if not 1 <= args.faults <= 255:
+            parser.error("--faults must be 1..255.")
+        import run
+        return 0 if run.sm4_demo(run.LessonTerminal(args.color, args.step), args.faults, args.row) else 2
     try:
         # Only the target simulator reads aes.KEY; the solver receives ciphertexts.
         target_key, plaintext = bytes.fromhex(aes.KEY), bytes.fromhex(aes.PLAINTEXT)

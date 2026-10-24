@@ -27,10 +27,15 @@ injection and embedded cryptographic implementations, with a focus on SM4.
 - **AES Piret-style DFA:** compare correct and faulty ciphertexts, construct
   final-round key candidates, intersect observations, recover K10 and reverse
   key expansion to reconstruct the master key.
+- **AES Giraud attack:** inject a single bit before final SubBytes, test inverse
+  S-box differences for Hamming weight one, recover all sixteen K10 bytes and
+  reverse the AES-128 key schedule.
 - **SM4:** key expansion, 32 rounds, S-box substitution, linear diffusion,
   rolling-state updates, final word reversal and decryption.
-- **SM4 DFA:** recover the final-round subkey under the controlled known-XOR
-  fault model described in the project notes.
+- **SM4 DFA:** recover rk31, rk30, rk29 and rk28 from controlled fault
+  observations, then reverse the schedule to recover the complete master key.
+- **SM4 Giraud-inspired adaptation:** use known or unknown single-bit filtering
+  and undo recovered rounds to obtain all four final subkeys and the master key.
 - **Interactive learning:** choose an algorithm and operation, move through
   individual steps, animate execution, inspect differences and export JSON reports.
 
@@ -58,11 +63,58 @@ python src/run.py
 python src/gui.py
 ```
 
+Choose **Giraud attack** in the GUI's Lesson selector for either algorithm.
+The bit position is unknown to the solver by default. Enable **Giraud: exact bit
+known to solver** for the stronger controlled-mask model. Use one of the masks
+`01`, `02`, `04`, `08`, `10`, `20`, `40`, `80` and 1–8 distinct observations per byte.
+The row/column fields select the first AES input byte; all sixteen bytes are
+processed. For SM4, row selects the first S-box byte and all four are processed.
+
+The candidate functions in `src/giraud.py` accept ciphertext observations and
+do not receive a secret key. Its optional `main()` runs a simple terminal
+simulation, independently of Tkinter. Visual reports and interface code stay
+in `src/gui.py`. Ambiguous observations never produce a claimed recovered key.
+
+```powershell
+python src/giraud.py
+```
+
+Use `--algorithm aes` or `--algorithm sm4` to select one cipher, `--step` for
+pauses, and `--known-bit` to share the exact fault mask with the solver. The
+default executes both models with unknown-bit filtering. The terminal recovers
+the complete AES and SM4 master keys.
+
+The controlled-byte SM4 attack is also available directly:
+
+```powershell
+python src/piret.py --algorithm sm4
+```
+
 The terminal supports optional step-by-step pauses with `--step`. In the GUI,
 use **Load standard example**, then **Build lesson**. Navigate with Previous/Next,
 the slider, the step selector or automatic playback.
 
 ## Fault models and recovery scope
+
+### Code responsibilities
+
+- `aes.py` and `sm4.py` implement normal encryption/decryption. Their block
+  functions return bytes without printing or pausing; their `main()` functions
+  show only normal input/output and round-trip verification.
+- `piret.py` and `giraud.py` inject faults through external observer functions
+  attached to the actual cipher execution. They do not run separate copies of
+  AES/SM4. Candidate solvers use ciphertext observations rather than secret keys.
+- `gui.py` presents the actual execution traces, comparisons and explanations.
+  `run.py` is the combined terminal entry point.
+- The optional observer is a generic experiment interface. With no observer,
+  the cipher follows its normal algorithm and no fault is injected.
+
+```powershell
+python src/aes.py
+python src/sm4.py
+python src/piret.py
+python src/giraud.py
+```
 
 ### AES
 
@@ -78,14 +130,22 @@ Recovery stops only when the candidate groups are unique.
 
 ### SM4
 
-The demonstration assumes a **known XOR fault in one S-box input byte in the last
-round**, indexed 31. Output differences are mapped back through the inverse
-linear layer, then S-box constraints identify candidates for **rk31**.
+Full recovery extends the PDF's last-round model to controlled faults in each
+of the final four rounds, indexed **31, 30, 29 and 28**. First recover rk31 from
+ciphertext differences. Use that recovered key to undo round 31 in both outputs,
+then apply the same differential equations to round 30. Repeat until rk28 is
+known, and reverse the key schedule using the four **DFA-recovered** subkeys.
 
-Recovering rk31 alone does **not** recover the SM4 master key. The subsequent
-key-schedule reversal exercise uses recovered rk31 together with **reference
-rk28, rk29 and rk30**, explicitly identified in the output. This distinction is
-preserved in the GUI and exported reports.
+No reference subkeys are supplied to the solver. Its inputs are the correct
+ciphertext and an oracle returning outputs for selected round/byte faults. The
+controlled-byte model knows the XOR mask; the Giraud-inspired model can test all
+eight bit positions without knowing which one was injected. A stage with multiple
+remaining candidates stops recovery before an unknown key could be used.
+
+This requires fault access to all four target rounds; last-round faults alone
+still recover only rk31. The multi-round experiment is an extension of the PDF,
+not a claim that the original last-round worked example already recovers the
+master key. Re-encryption verifies the final result in the terminal and GUI.
 
 These are **software fault simulations**. They support understanding and checking
 the fault models; they do not establish that physical clock or voltage glitches
@@ -99,6 +159,7 @@ src/
   aes.py                   Didactic AES-128 implementation
   sm4.py                   SM4 implementation and configurable example inputs
   piret.py                 AES DFA helpers and terminal key-recovery lesson
+  giraud.py                AES single-bit Giraud attack and SM4 adaptation
   run.py                   Combined terminal demonstrations matching the notes
   gui.py                   Interactive AES / SM4 / DFA interface
 docs/
@@ -123,6 +184,11 @@ Tests cover known-answer vectors, independent OpenSSL comparisons when OpenSSL
 is available, encryption/decryption consistency, fault propagation, candidate
 intersections, key-schedule reversal, ambiguous observations, terminal colors
 and GUI workflows. GUI integration checks use a hidden Tk window.
+
+Full SM4 recovery tests use random keys and a precomputed ciphertext-only oracle.
+They block access to `sm4.key_expansion` while the solver runs, verifying that
+recovery succeeds without reading a reference schedule. The MATLAB campaign
+retains its explicitly labeled single-round rk31 target for statistical analysis.
 
 The default public vectors include:
 
