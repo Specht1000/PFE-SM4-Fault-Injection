@@ -1,0 +1,32 @@
+\chapter{SM4: Complete Structure and First Round}
+\section{Official test vector}
+\begin{center}\begin{tabular}{ll}\toprule Plaintext&\hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210}\\Master key&\hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210}\\Ciphertext&\hex{681EDF34\allowbreak{}D206965E\allowbreak{}86B3E94F\allowbreak{}536E4246}\\\bottomrule\end{tabular}\end{center}
+Split the plaintext into four 32-bit words:
+\[X_0=\hex{01234567},\quad X_1=\hex{89ABCDEF},\quad X_2=\hex{FEDCBA98},\quad X_3=\hex{76543210}.\]
+\section{SM4 round function}
+SM4 performs 32 rounds, producing one new 32-bit word per round:
+\[\boxed{X_{i+4}=X_i\xor T(X_{i+1}\xor X_{i+2}\xor X_{i+3}\xor rk_i)}.\]
+Write \(T=L\circ\tau\), where \(\tau\) substitutes the four bytes through the SM4 S-box and
+\[L(B)=B\xor(B\rol2)\xor(B\rol10)\xor(B\rol18)\xor(B\rol24).\]
+The output reverses the final four words:
+\[C=X_{35}\parallel X_{34}\parallel X_{33}\parallel X_{32}.\]
+\section{SM4 key expansion}
+The four initial key-schedule words are \(K_i=MK_i\xor FK_i\), with
+\[\begin{array}{ll}FK_0=\hex{A3B1BAC6},&FK_1=\hex{56AA3350},\\FK_2=\hex{677D9197},&FK_3=\hex{B27022DC}.\end{array}\]
+The key-schedule recurrence is
+\[K_{i+4}=K_i\xor T'(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i),\quad rk_i=K_{i+4},\]
+with \(T'=L'\circ\tau\) and
+\[L'(B)=B\xor(B\rol13)\xor(B\rol23).\]
+\textbf{Crucial distinction:} encryption uses \(L\), while key expansion uses \(L'\). They have different rotation constants.
+For the first round, \(rk_0=\hex{F12186F9}\).
+\section{Detailed computation of encryption round 0}
+\paragraph{Step 1: XOR the three newest words with the round key.}
+\[A=X_1\xor X_2\xor X_3\xor rk_0=\hex{F002C39E}.\]
+\paragraph{Step 2: Apply the SM4 S-box to each byte.}
+\[\hex{F0}\mapsto\hex{18},\quad\hex{02}\mapsto\hex{E9},\quad\hex{C3}\mapsto\hex{92},\quad\hex{9E}\mapsto\hex{B1}.\]
+Thus \(B=\tau(A)=\hex{18E992B1}\).
+\paragraph{Step 3: Apply the linear transformation.}
+\begin{center}\begin{tabular}{ll}\toprule Term&Hexadecimal value\\\midrule\(B\)&\hex{18E992B1}\\\(B\rol2\)&\hex{63A64AC4}\\\(B\rol10\)&\hex{A64AC463}\\\(B\rol18\)&\hex{4AC463A6}\\\(B\rol24\)&\hex{B118E992}\\\midrule XOR of all five&\hex{26D99622}\\\bottomrule\end{tabular}\end{center}
+\paragraph{Step 4: XOR with the oldest word.}
+\[X_4=X_0\xor L(B)=\hex{01234567}\xor\hex{26D99622}=\boxed{\hex{27FAD345}}.\]
+The next four-word window is \((X_1,X_2,X_3,X_4)\). The following words are \(X_5=\hex{A18B4CB2}\), \(X_6=\hex{11C1E22A}\), and \(X_7=\hex{CC13E2EE}\). After 32 rounds and the output reversal, the official ciphertext is obtained.

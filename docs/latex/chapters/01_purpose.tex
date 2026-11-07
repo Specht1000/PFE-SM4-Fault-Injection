@@ -1,0 +1,9 @@
+\chapter{Purpose and Notation}
+This document reorganizes the supplied handwritten AES/SM4 notes into a progressive English explanation. It distinguishes established algorithmic facts, pedagogical fault simulations, and the additional work needed for a physical attack.
+\begin{itemize}
+\item \(\xor\): bitwise XOR; \(\rol n\): 32-bit circular left rotation by \(n\) bits.
+\item \(S\): an 8-bit substitution box (AES and SM4 use different S-boxes).
+\item \(C\): correct ciphertext; \(F\): faulty ciphertext; \(\Delta=C\xor F\).
+\item All hexadecimal words are written most-significant byte first. SM4 words are 32 bits.
+\end{itemize}
+\note{A known plaintext/key test vector is used to \emph{verify} examples. In an actual key-recovery experiment, the attacker does not know the secret key.}

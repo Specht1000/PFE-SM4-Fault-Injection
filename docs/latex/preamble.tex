@@ -1,0 +1,34 @@
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{lmodern}
+\usepackage{geometry}
+\geometry{margin=25mm}
+\usepackage{amsmath,amssymb,booktabs,array,longtable,xcolor,graphicx,hyperref,fancyhdr,tikz,fvextra,float,ragged2e}
+% Left-aligned paragraph columns keep narrow table cells from stretching words.
+\newcolumntype{P}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\definecolor{navy}{HTML}{15324F}
+\definecolor{pale}{HTML}{EDF3F8}
+\definecolor{codegreen}{HTML}{226644}
+\newcommand{\hex}[1]{\texttt{#1}}
+\newcommand{\xor}{\mathbin{\oplus}}
+\newcommand{\rol}{\mathbin{\lll}}
+\newcommand{\note}[1]{\par\smallskip\noindent\colorbox{pale}{\parbox{0.94\linewidth}{\textbf{Note.} #1}}\par\smallskip}
+\pagestyle{fancy}\fancyhf{}\fancyhead[L]{\small AES and SM4: Fault Analysis}\fancyhead[R]{\small PFE 5A}\fancyfoot[C]{\thepage}
+\setlength{\headheight}{14pt}
+% Plain verbatim avoids the per-token Python parser in long code appendices.
+% Keep every explanation and source line; wrapping is typography only.
+\DefineVerbatimEnvironment{lightcode}{Verbatim}{fontsize=\scriptsize,breaklines=true,breakanywhere=false,numbersep=5pt,xleftmargin=6mm}
+\DeclareUnicodeCharacter{00B7}{\ensuremath{\cdot}}
+\DeclareUnicodeCharacter{00D7}{\ensuremath{\times}}
+\DeclareUnicodeCharacter{2192}{\ensuremath{\rightarrow}}
+\DeclareUnicodeCharacter{2190}{\ensuremath{\leftarrow}}
+\DeclareUnicodeCharacter{25B6}{\ensuremath{\triangleright}}
+\DeclareUnicodeCharacter{2161}{II}
+\DeclareUnicodeCharacter{2026}{\ldots}
+\setcounter{tocdepth}{1}
+\hypersetup{bookmarksdepth=1}
+\pdfstringdefDisableCommands{\def\allowbreak{}}
+\setlength{\emergencystretch}{3em}

@@ -1,0 +1,8 @@
+\chapter{AES versus SM4: Key Lessons}
+\begin{center}\begin{tabular}{P{.35\linewidth}P{.28\linewidth}P{.28\linewidth}}\toprule Property&AES-128&SM4\\\midrule Block size&128 bits&128 bits\\Key size&128 bits&128 bits\\Rounds&10&32\\State&4$\times$4 byte matrix&Four 32-bit words\\Nonlinearity&AES S-box&SM4 S-box\\Linear diffusion&MixColumns and ShiftRows&Rotations and XOR in \(L\)\\Last-round target&\(K_{10}\), 128 bits&\(rk_{31}\), 32 bits\\Master-key recovery&Reverse AES expansion&Reverse SM4 expansion from four consecutive round keys\\\bottomrule\end{tabular}\end{center}
+\section*{Summary}
+For AES Giraud, inject a one-bit fault before final-round SubBytes, test inverse-S-box differences for Hamming weight one, and intersect key-byte candidates. The corresponding SM4 adaptation first inverts the linear map $L$ to isolate the S-box differential.
+
+For AES Piret--Quisquater, compare correct and faulty ciphertexts, invert the last S-box under candidate \(K_{10}\) bytes, match round-9 MixColumns differential patterns, intersect candidates, and reverse the AES key schedule.
+
+For the illustrated SM4 model, compare correct and faulty ciphertexts, invert the linear map \(L\), test S-box input candidates using the known fault differences, derive \(rk_{31}\), and obtain further subkeys with additional appropriate experiments. Once four consecutive round keys are known, the SM4 key schedule can be reversed exactly.

@@ -1,0 +1,53 @@
+\chapter{Differential Fault Analysis of SM4: A Worked Last-Round Model}
+\section{Attack model and limitations}
+We use a \emph{controlled, known XOR fault} in one byte of the input to the SM4 S-boxes in round 31. This is a pedagogical model, not a claim that a real clock/voltage glitch yields a known XOR value. In this model, all other round inputs remain unchanged.
+The last round is
+\[X_{35}=X_{31}\xor L(\tau(A)),\qquad A=X_{32}\xor X_{33}\xor X_{34}\xor rk_{31}.\]
+The attacker observes the correct ciphertext and a faulty ciphertext. The secret internal values below are supplied \emph{only for checking the simulation}.
+\section{Known ciphertext and hidden internal values}
+\[\begin{array}{ll}X_{35}=\hex{681EDF34},&X_{34}=\hex{D206965E},\\X_{33}=\hex{86B3E94F},&X_{32}=\hex{536E4246}.\end{array}\]
+For this official test vector, the simulation has
+\[X_{31}=\hex{7B938F4C},\quad A=\hex{96FF9D45},\quad rk_{31}=\hex{9124A012}.\]
+The attacker must recover the key rather than assume it.
+\section{Step 1: Inject a known XOR fault}
+Alter the first byte of \(A\) by \(e=\hex{01}\):
+\[A=\hex{96FF9D45}\longrightarrow A'=\hex{97FF9D45}.\]
+\section{Step 2: Observe the S-box difference}
+The two S-box outputs are
+\[B=\tau(A)=\hex{1A488C73},\qquad B'=\tau(A')=\hex{55488C73}.\]
+Consequently,
+\[\Delta B=B\xor B'=\hex{4F000000}.\]
+\section{Step 3: Propagate the difference through L}
+Because \(L\) is XOR-linear,
+\[\Delta X_{35}=L(B)\xor L(B')=L(\Delta B)=\hex{734E3D3D}.\]
+The correct last word is \(X_{35}=\hex{681EDF34}\), so the faulty last word is
+\[X'_{35}=\hex{681EDF34}\xor\hex{734E3D3D}=\hex{1B50E209}.\]
+Therefore the attacker sees
+\begin{center}\begin{tabular}{ll}\toprule Correct ciphertext&\hex{681EDF34 D206965E 86B3E94F 536E4246}\\Faulty ciphertext&\hex{1B50E209 D206965E 86B3E94F 536E4246}\\Difference&\hex{734E3D3D 00000000 00000000 00000000}\\\bottomrule\end{tabular}\end{center}
+\section{Step 4: Undo the linear layer from observed data}
+The attacker computes
+\[\Delta B=L^{-1}(\Delta X_{35})=L^{-1}(\hex{734E3D3D})=\hex{4F000000}.\]
+The first S-box byte therefore satisfies
+\[S(a)\xor S(a\xor\hex{01})=\hex{4F}.\]
+Enumerating all 256 possible input bytes gives the candidate set
+\[\mathcal A_1=\{\hex{96},\hex{97}\}.\]
+\section{Step 5: Convert S-box input candidates to key candidates}
+The attacker knows the last three words from the ciphertext:
+\[X_{32}\xor X_{33}\xor X_{34}=\hex{07DB3D57}.\]
+Since \(rk_{31}=A\xor\hex{07DB3D57}\), the first byte of the key is
+\[rk_{31}[0]=a\xor\hex{07}.\]
+Thus \(a=\hex{96}\) yields \(\hex{91}\), while \(a=\hex{97}\) yields \(\hex{90}\). After one observation, the candidates are \(\{\hex{91},\hex{90}\}\).
+\section{Step 6: Use independent observations}
+Repeat with the \emph{same plaintext and state}, but use a known XOR fault \(e=\hex{02}\). The new S-box difference is \(d_2=\hex{81}\). Keep only input candidates satisfying both
+\[\begin{cases}S(a)\xor S(a\xor\hex{01})=\hex{4F},\\S(a)\xor S(a\xor\hex{02})=\hex{81}.\end{cases}\]
+The intersection identifies \(a=\hex{96}\), hence \(rk_{31}[0]=\hex{91}\).
+\section{Step 7: Repeat for the other three bytes}
+The supplied worked example reports the following bytewise observations under the same controlled-fault assumption:
+\begin{center}\begin{tabular}{ccccc}\toprule Byte&\(d\) for \(e=01\)&\(d\) for \(e=02\)&Recovered \(A\)&Recovered \(rk_{31}\)\\\midrule0&4F&81&96&91\\1&71&83&FF&24\\2&79&6F&9D&A0\\3&80&C9&45&12\\\bottomrule\end{tabular}\end{center}
+This reconstructs
+\[A=\hex{96FF9D45},\qquad rk_{31}=A\xor\hex{07DB3D57}=\boxed{\hex{9124A012}}.\]
+\note{This illustrates last-round subkey recovery \emph{conditional on the fault model}. The listed observations should be validated against a software implementation before treating them as experimental results.}
+\section{What happens after recovering the last subkey?}
+Knowing \(rk_{31}\), reconstruct the previous state word:
+\[X_{31}=X_{35}\xor T(X_{32}\xor X_{33}\xor X_{34}\xor rk_{31}).\]
+For the example, \(X_{31}=\hex{7B938F4C}\). However, this does \emph{not} automatically reveal \(rk_{30}\). Additional fault observations and state constraints are required for rounds 30, 29, and 28. The present worked example does not demonstrate that stage of the attack.

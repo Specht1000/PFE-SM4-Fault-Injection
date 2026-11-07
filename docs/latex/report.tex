@@ -1,0 +1,85 @@
+\input{preamble.tex}
+
+% Default: compile only theory to keep Overleaf work per build small.
+% 1 theory; 2 attack walkthrough; 3 cipher functions; 4 attack functions;
+% 5 terminal/GUI; 6..11 complete sources; 0 entire report.
+% The part_XX.tex entry points below also select these parts automatically.
+\providecommand{\ReportPart}{1}
+\newif\ifshowpart
+\newcommand{\SelectPart}[1]{%
+  \showpartfalse
+  \ifnum\ReportPart=0\relax\showparttrue\fi
+  \ifnum\ReportPart=#1\relax\showparttrue\fi
+}
+\begin{document}
+\input{frontmatter/title.tex}
+\pagenumbering{roman}
+\hypersetup{pageanchor=true}
+\ifnum\ReportPart=0\relax
+  \noindent\textbf{Complete report.} All chapters and source appendices are included.
+\else
+  \noindent\textbf{Selected part: \ReportPart.} This PDF contains only the selected part.
+  Choose a \texttt{part\_XX.tex} main document or change \texttt{\textbackslash{}ReportPart}
+  to build another part. All content is preserved in the chapter and appendix files.
+\fi
+\par\medskip
+\tableofcontents\clearpage
+\pagenumbering{arabic}
+
+\SelectPart{1}
+\ifshowpart
+  \input{parts/01_theory.tex}
+\fi
+
+\SelectPart{2}
+\ifshowpart
+  \input{parts/02_attack_walkthrough.tex}
+\fi
+
+\SelectPart{3}
+\ifshowpart
+  \input{parts/03_cipher_functions.tex}
+\fi
+
+\SelectPart{4}
+\ifshowpart
+  \input{parts/04_attack_functions.tex}
+\fi
+
+\SelectPart{5}
+\ifshowpart
+  \input{parts/05_terminal_gui.tex}
+\fi
+
+\SelectPart{6}
+\ifshowpart
+  \input{parts/06_source_aes.tex}
+\fi
+
+\SelectPart{7}
+\ifshowpart
+  \input{parts/07_source_sm4.tex}
+\fi
+
+\SelectPart{8}
+\ifshowpart
+  \input{parts/08_source_piret.tex}
+\fi
+
+\SelectPart{9}
+\ifshowpart
+  \input{parts/09_source_giraud.tex}
+\fi
+
+\SelectPart{10}
+\ifshowpart
+  \input{parts/10_source_run.tex}
+\fi
+
+\SelectPart{11}
+\ifshowpart
+  \input{parts/11_source_gui.tex}
+\fi
+
+\input{frontmatter/references.tex}
+\end{document}

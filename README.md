@@ -51,6 +51,20 @@ are required.
 
 Run these commands from the repository root.
 
+Every terminal execution of `aes.py`, `sm4.py`, `piret.py`, `giraud.py` or
+`run.py` also saves its output in `logs/<script>.txt` and `logs/<script>.html`.
+Each run replaces that program's previous logs instead of appending text or
+creating timestamped files. Old timestamped logs for that program are removed
+automatically. Logs from other programs are preserved. The first line prints
+the complete log path. The files use UTF-8;
+the text file preserves terminal ANSI colors. A matching `.html` file renders
+those colors in a browser, including red fault differences and green recovery
+results. A plain text editor may show ANSI codes rather than colors; open the
+HTML file for the formatted version. Use `--color always` on attack commands to
+retain colors even when stdout is redirected. Standard errors and unexpected
+tracebacks are captured too. The
+`logs/` folder is ignored by Git. Imports and GUI execution do not create logs.
+
 **Terminal — AES + Piret, followed by SM4 + DFA:**
 
 ```powershell
@@ -79,6 +93,13 @@ in `src/gui.py`. Ambiguous observations never produce a claimed recovered key.
 python src/giraud.py
 ```
 
+The terminal explains per-pair byte guesses, candidate intersections and complete
+master-key recovery for both algorithms. AES prints every reversed schedule word
+and K9 through K0. SM4 shows round peeling, rk31 through rk28 recovered from
+faults, rk27 through rk0 derived from the schedule, and the final FK removal.
+Unknown-bit mode displays all eight permitted errors; only `--known-bit` shares
+the exact simulator mask with the candidate solver. Add `--step` for pauses.
+
 Use `--algorithm aes` or `--algorithm sm4` to select one cipher, `--step` for
 pauses, and `--known-bit` to share the exact fault mask with the solver. The
 default executes both models with unknown-bit filtering. The terminal recovers
@@ -89,6 +110,12 @@ The controlled-byte SM4 attack is also available directly:
 ```powershell
 python src/piret.py --algorithm sm4
 ```
+
+This command explains each byte candidate, restores earlier round views with
+already recovered subkeys, and assembles rk31 through rk28 from DFA observations.
+It then prints all inverse-schedule equations, derives rk27 through rk0, removes
+the four FK constants and assembles the original master key. Earlier subkeys are
+explicitly labeled as schedule-derived. Add `--step` to pause during the lesson.
 
 The terminal supports optional step-by-step pauses with `--step`. In the GUI,
 use **Load standard example**, then **Build lesson**. Navigate with Previous/Next,

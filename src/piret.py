@@ -716,7 +716,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except (KeyboardInterrupt, EOFError):
-        print("\nLesson stopped.")
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "piret"))

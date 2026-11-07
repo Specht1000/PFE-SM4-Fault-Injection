@@ -1,0 +1,146 @@
+\chapter{Giraud Fault Attack on AES-128 and Its Adaptation to SM4}
+\label{chap:giraud}
+\section{Core idea and comparison with Piret--Quisquater}
+Giraud's AES fault-analysis approach exploits a \emph{single-bit} fault close to the last round. In contrast to the Piret--Quisquater example, which injects a byte fault before the ninth-round MixColumns and typically modifies four ciphertext bytes, a single-byte fault immediately before the final SubBytes affects only one ciphertext byte: the last AES round does not contain MixColumns. The attacker tests last-round key-byte candidates by checking whether the inverse-S-box input difference has Hamming weight one.
+
+\section{AES-128: precise fault location}
+Let $U$ denote the state after round 9 AddRoundKey, just before round 10 SubBytes. A one-bit XOR fault modifies a single input byte $a$ into $a'=a\xor e$, where $e\in\{\hex{01},\hex{02},\hex{04},\hex{08},\hex{10},\hex{20},\hex{40},\hex{80}\}$. Round 10 performs SubBytes, ShiftRows and AddRoundKey $K_{10}$; there is no MixColumns. ShiftRows relocates the changed byte without increasing the number of affected bytes.
+
+For the affected ciphertext position $j$, with correct byte $c$, faulty byte $f$, and unknown last-round key byte $k$, the attacker evaluates
+\begin{equation}
+\delta(k)=S_{\mathrm{AES}}^{-1}(c\xor k)\xor S_{\mathrm{AES}}^{-1}(f\xor k).
+\label{eq:giraud_aes_test}
+\end{equation}
+The candidate is compatible with the fault model if
+\begin{equation}
+\delta(k)\in\mathcal E=\{\hex{01},\hex{02},\hex{04},\hex{08},\hex{10},\hex{20},\hex{40},\hex{80}\}.
+\end{equation}
+Equivalently, the 8-bit value $\delta(k)$ must have Hamming weight exactly one. If the injected bit position is known, the condition can be made stronger: $\delta(k)=e$.
+
+\section{Worked AES-128 example: the first ciphertext byte}
+We use the official AES-128 test vector already introduced in this report:
+\begin{align*}
+P&=\hex{00112233\allowbreak{}44556677\allowbreak{}8899AABB\allowbreak{}CCDDEEFF},\\
+K_0&=\hex{00010203\allowbreak{}04050607\allowbreak{}08090A0B\allowbreak{}0C0D0E0F},\\
+C&=\hex{69C4E0D8\allowbreak{}6A7B0430\allowbreak{}D8CDB780\allowbreak{}70B4C55A}.
+\end{align*}
+The first byte entering the final SubBytes is $a=\hex{BD}$. Inject $e=\hex{01}$ in that byte:
+\begin{equation}
+\hex{BD}\xor\hex{01}=\hex{BC}.
+\end{equation}
+The AES S-box maps $S(\hex{BD})=\hex{7A}$ and $S(\hex{BC})=\hex{65}$. The first byte of $K_{10}$ is $\hex{13}$, so
+\begin{align*}
+c&=\hex{7A}\xor\hex{13}=\hex{69},\\
+f_1&=\hex{65}\xor\hex{13}=\hex{76}.
+\end{align*}
+Thus the simulated faulty ciphertext is
+\begin{equation}
+F_1=\hex{76C4E0D8\allowbreak{}6A7B0430\allowbreak{}D8CDB780\allowbreak{}70B4C55A}.
+\end{equation}
+The attacker does not assume the value $\hex{13}$: it is shown here solely to verify the example. For candidate $k=\hex{13}$, equation~\eqref{eq:giraud_aes_test} gives
+\begin{align*}
+S^{-1}(\hex{69}\xor\hex{13})&=S^{-1}(\hex{7A})=\hex{BD},\\
+S^{-1}(\hex{76}\xor\hex{13})&=S^{-1}(\hex{65})=\hex{BC},\\
+\delta(\hex{13})&=\hex{BD}\xor\hex{BC}=\boxed{\hex{01}}.
+\end{align*}
+The candidate is compatible with a single-bit fault, but one correct/faulty pair may leave several candidates.
+
+\section{Multiple faults and candidate intersection}
+Repeat the encryption with the same plaintext and key and introduce an independent single-bit fault at the same location. In the worked example, choosing $e_2=\hex{02}$ produces $a_2'=\hex{BF}$ and a second faulty first ciphertext byte $f_2=\hex{1B}$. For observation $t$, define
+\begin{equation}
+\mathcal K_t=\bigl\{k\in\{0,\ldots,255\}:S^{-1}(c\xor k)\xor S^{-1}(f_t\xor k)\in\mathcal E\bigr\}.
+\end{equation}
+The surviving candidates are the intersection $\mathcal K=\bigcap_t\mathcal K_t$. For the illustrated pair of faults, the recovered first byte is $K_{10}[0]=\hex{13}$. The number of observations required is not fixed: it depends on the fault model and the observed differences.
+
+Repeating the experiment across all sixteen pre-final-SubBytes byte positions allows the attacker, under this model, to reconstruct all sixteen bytes of $K_{10}$. For the official vector,
+\begin{equation}
+K_{10}=\hex{13111D7F\allowbreak{}E3944A17\allowbreak{}F307A78B\allowbreak{}4D2B30C5}.
+\end{equation}
+The AES-128 key schedule can then be reversed to recover the original key $K_0$, as explained in the preceding AES key-expansion chapter.
+
+\section{Adaptation of the single-bit idea to SM4}
+\label{sec:giraud_sm4}
+The corresponding SM4 experiment is an \emph{adaptation of the single-bit differential filtering principle}, rather than a claim that the original AES attack transfers unchanged. The SM4 last round is
+\begin{equation}
+X_{35}=X_{31}\xor L\bigl(\tau(A)\bigr),\qquad A=X_{32}\xor X_{33}\xor X_{34}\xor rk_{31}.
+\end{equation}
+The output is $C=(X_{35},X_{34},X_{33},X_{32})$. Inject a single-bit fault in one byte of $A$, just before the last-round S-boxes. Unlike AES, the SM4 linear map $L$ diffuses the one-byte S-box output difference over the 32-bit word $X_{35}$. The other three ciphertext words remain unchanged \emph{under the assumed isolated-fault model}.
+
+Let $F$ be the faulty ciphertext and $\Delta X_{35}=X_{35}\xor X'_{35}$. Since $L$ is linear and invertible, the attacker can compute
+\begin{equation}
+\Delta B=L^{-1}(\Delta X_{35})=\tau(A)\xor\tau(A').
+\end{equation}
+For an affected byte with S-box input $a$ and unknown single-bit error $e$, candidate inputs satisfy
+\begin{equation}
+S_{\mathrm{SM4}}(a)\xor S_{\mathrm{SM4}}(a\xor e)=d,
+\quad e\in\mathcal E,
+\end{equation}
+where $d$ is the corresponding byte of $\Delta B$. If $e$ is known from the simulation, it is used directly; otherwise all eight one-bit masks must be tested. Multiple correct/faulty observations reduce the candidate set by intersection.
+
+\section{Worked SM4 example and recovery of \texorpdfstring{$rk_{31}$}{rk31}}
+Using the official SM4 test vector,
+\begin{align*}
+P&=\hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210},\\
+MK&=\hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210},\\
+C&=\hex{681EDF34\allowbreak{}D206965E\allowbreak{}86B3E94F\allowbreak{}536E4246},
+\end{align*}
+the simulated input of the last S-box layer is $A=\hex{96FF9D45}$. A one-bit fault $e=\hex{01000000}$ gives $A'=\hex{97FF9D45}$. The substitution outputs are
+\begin{align*}
+\tau(A)&=\hex{1A488C73},\\
+\tau(A')&=\hex{55488C73},\\
+\Delta B&=\hex{4F000000}.
+\end{align*}
+After the linear layer,
+\begin{equation}
+\Delta X_{35}=L(\hex{4F000000})=\hex{734E3D3D}.
+\end{equation}
+Therefore the faulty output is
+\begin{equation}
+F_1=\hex{1B50E209\allowbreak{}D206965E\allowbreak{}86B3E94F\allowbreak{}536E4246}.
+\end{equation}
+From the observed difference alone, the attacker obtains $\Delta B=L^{-1}(\hex{734E3D3D})=\hex{4F000000}$. With known fault mask $\hex{01}$ in the first byte, the candidate equation is
+\begin{equation}
+S_{\mathrm{SM4}}(a)\xor S_{\mathrm{SM4}}(a\xor\hex{01})=\hex{4F}.
+\end{equation}
+The first observation permits $a\in\{\hex{96},\hex{97}\}$. A second simulated fault of mask $\hex{02}$ gives the first-byte S-box difference $\hex{81}$. Intersecting both sets identifies $a=\hex{96}$.
+
+The three known ciphertext words yield
+\begin{equation}
+X_{32}\xor X_{33}\xor X_{34}=\hex{07DB3D57}.
+\end{equation}
+Thus the first last-round key byte is
+\begin{equation}
+rk_{31}[0]=\hex{96}\xor\hex{07}=\boxed{\hex{91}}.
+\end{equation}
+The supplied worked example applies analogous observations to the remaining three S-box inputs, obtaining
+\begin{equation}
+A=\hex{96FF9D45},\qquad rk_{31}=A\xor\hex{07DB3D57}=\boxed{\hex{9124A012}}.
+\end{equation}
+The bytewise simulated differences are summarized below.
+\begin{center}
+\begin{tabular}{ccccc}\toprule
+Byte&$d$ for $e=01$&$d$ for $e=02$&Recovered $A$&Recovered $rk_{31}$\\\midrule
+0&4F&81&96&91\\
+1&71&83&FF&24\\
+2&79&6F&9D&A0\\
+3&80&C9&45&12\\\bottomrule
+\end{tabular}
+\end{center}
+\note{The numerical values in this subsection are simulated, not physical fault-injection measurements. In particular, knowledge of the exact XOR mask is a strong experimental assumption.}
+
+\section{From the final SM4 subkey to the master key}
+Recovering $rk_{31}$ is not equivalent to recovering the 128-bit master key. The SM4 key schedule needs four consecutive 32-bit round keys to be inverted. In the official test vector these are
+\begin{align*}
+rk_{28}&=\hex{428D3654},&rk_{29}&=\hex{62293496},\\
+rk_{30}&=\hex{01CF72E5},&rk_{31}&=\hex{9124A012}.
+\end{align*}
+The values $rk_{28}$, $rk_{29}$ and $rk_{30}$ are \emph{reference values}, not keys shown to have been recovered by the two last-round faults. The two last-round faults do not recover these other keys. The implemented multi-round extension in the attack walkthrough in Part 2 obtains them by requesting new faults in rounds 30, 29 and 28 and undoing previously recovered later rounds.
+
+With four consecutive round keys, set $K_{i+4}=rk_i$ and invert the SM4 recurrence:
+\begin{equation}
+K_i=K_{i+4}\xor T'\bigl(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i\bigr).
+\end{equation}
+Iterating backward yields $K_0,K_1,K_2,K_3$. Undo the fixed initial constants $FK_i$ via $MK_i=K_i\xor FK_i$ and concatenate the four words to recover the 128-bit master key.
+
+\section{Experimental implications}
+A software simulation can inject an exact XOR mask at a chosen intermediate value. On an STM32 target, a voltage or clock glitch may instead alter multiple bits, skip an instruction, affect control flow, or produce no useful fault. A practical evaluation should therefore log correct and faulty ciphertexts, classify observed fault patterns, verify whether the assumed location and single-bit model are plausible, and report recovery success separately from simulation-only results.

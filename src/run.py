@@ -121,6 +121,142 @@ def reverse_sm4(final_keys, observer=None):
     return piret.reverse_sm4(final_keys, observer)
 
 
+def show_sm4_peeling(terminal, ciphertext, target_round, recovered_keys):
+    """Explain restored words using only subkeys already recovered by DFA."""
+    view = ciphertext
+    for number in range(31, target_round, -1):
+        words = struct.unpack(">4I", view)[::-1]
+        round_key = recovered_keys[number]
+        value = words[0] ^ words[1] ^ words[2] ^ round_key
+        substituted = sm4.sbox(value)
+        diffused = sm4.linear(substituted)
+        # The attack engine performs the actual reversal; this helper explains it.
+        view = piret.peel_sm4(ciphertext, number-1, recovered_keys)
+        previous = struct.unpack(">4I", view)[-1]
+        print(f"  Undo round {number} with recovered rk{number}={round_key:08X}")
+        print(f"    A = {words[0]:08X} XOR {words[1]:08X} XOR {words[2]:08X} XOR {round_key:08X} = {value:08X}")
+        print(f"    tau(A) = {substituted:08X}; L(tau(A)) = {diffused:08X}")
+        print(f"    X{number} = X{number+4} XOR L(tau(A)) = {words[3]:08X} XOR {diffused:08X} = {previous:08X}")
+        print(f"    Restored output view: {view.hex().upper()}")
+
+
+def show_sm4_key_schedule(terminal, recovered_keys):
+    """Explain inverse expansion and FK removal from the DFA-recovered tail."""
+    terminal.section("SM4: REVERSE THE KEY SCHEDULE / RECOVER ALL EARLIER SUBKEYS")
+    print("DFA recovered rk31..rk28. Earlier rk values below are DERIVED by reversing the schedule.")
+    print("K[i+4] = rk[i]; K[i] = K[i+4] XOR L'(tau(K[i+1] XOR K[i+2] XOR K[i+3] XOR CK[i]))")
+    print("L'(B) = B XOR rol(B,13) XOR rol(B,23). This is NOT the data transform L.")
+    final_keys = [recovered_keys[number] for number in range(28, 32)]
+    words = [None] * 32 + final_keys
+    for number in range(28, 32):
+        print(f"Starting word K[{number+4}] = DFA-recovered rk{number} = {recovered_keys[number]:08X}")
+
+    def report(index, recovered_word):
+        value = words[index+1] ^ words[index+2] ^ words[index+3] ^ sm4.CK[index]
+        substituted = sm4.sbox(value)
+        transformed = sm4.linear_key(substituted)
+        words[index] = recovered_word
+        print(f"\nSchedule step i={index}")
+        print(f"  U = K[{index+1}] XOR K[{index+2}] XOR K[{index+3}] XOR CK[{index}]")
+        print(f"    = {words[index+1]:08X} XOR {words[index+2]:08X} XOR {words[index+3]:08X} XOR {sm4.CK[index]:08X} = {value:08X}")
+        print(f"  tau(U) = {substituted:08X}; L'(tau(U)) = {transformed:08X}")
+        print(f"  K[{index}] = K[{index+4}] XOR L'(tau(U)) = {words[index+4]:08X} XOR {transformed:08X} = {recovered_word:08X}")
+        if index >= 4:
+            print(terminal.paint(f"  DERIVED rk{index-4} = {recovered_word:08X}", "32"))
+        else:
+            print(f"  K[{index}] is an initial whitened key word, not an encryption subkey.")
+        terminal.pause()
+
+    master = piret.reverse_sm4(final_keys, observer=report)
+    terminal.section("SM4: REMOVE FK CONSTANTS / ASSEMBLE THE ORIGINAL MASTER KEY")
+    for index in range(4):
+        value = words[index] ^ sm4.FK[index]
+        print(f"MK[{index}] = K[{index}] XOR FK[{index}] = {words[index]:08X} XOR {sm4.FK[index]:08X} = " + terminal.paint(f"{value:08X}", "1;32"))
+    print("Master key = MK[0] || MK[1] || MK[2] || MK[3] = " + terminal.paint(master.hex().upper(), "1;32"))
+    return master
+
+
+def show_sm4_observation(terminal, event, recovered_bytes, start_byte=0, known_bit=None):
+    """Explain one byte-DFA or Giraud event without strengthening its model."""
+    number, byte = event['round'], event['byte']
+    if byte == start_byte and event['observation'] == 1:
+        terminal.section(f"SM4: DISCOVER rk{number} FROM NEW ROUND-{number} FAULTS")
+        if number == 31:
+            print("Round 31 is already last; no round needs to be undone.")
+        else:
+            keys = {int(r): int(value, 16) for r, value in event['peeled_with'].items()}
+            print("Restore the target round using ONLY previously recovered later subkeys.")
+            print("Correct execution:")
+            show_sm4_peeling(terminal, bytes.fromhex(event['correct']), number, keys)
+            print("Faulty execution (a NEW fault at the target round):")
+            show_sm4_peeling(terminal, bytes.fromhex(event['faulty']), number, keys)
+    print(f"\nRound {event['round']}, byte {event['byte']}, observation {event['observation']}, mask {event['mask']:02X}")
+    terminal.pair(bytes.fromhex(event['correct']), bytes.fromhex(event['faulty']))
+    print("Undo later rounds using ONLY previously recovered subkeys: " + str(event['peeled_with']))
+    terminal.pair(bytes.fromhex(event['clean_view']), bytes.fromhex(event['faulty_view']))
+    clean_words = struct.unpack(">4I", bytes.fromhex(event['clean_view']))
+    faulty_words = struct.unpack(">4I", bytes.fromhex(event['faulty_view']))
+    shift = 24 - 8 * byte
+    known = ((clean_words[1] ^ clean_words[2] ^ clean_words[3]) >> shift) & 255
+    delta = (event['delta_b'] >> shift) & 255
+    print(f"DeltaX = {clean_words[0]:08X} XOR {faulty_words[0]:08X} = {clean_words[0] ^ faulty_words[0]:08X}")
+    print(f"DeltaB = L-inverse(DeltaX) = {event['delta_b']:08X}; selected byte difference = {delta:02X}")
+    print(f"Known byte q = byte {byte} of (X{number+1} XOR X{number+2} XOR X{number+3}) = {known:02X}")
+    if known_bit is False:
+        allowed = (1, 2, 4, 8, 16, 32, 64, 128)
+        print("UNKNOWN-BIT FILTER: the simulator mask above is NOT given to the candidate solver.")
+    else:
+        allowed = (event['mask'],)
+        print("KNOWN-MASK FILTER: the exact error is given to the candidate solver.")
+    print("Allowed input errors: " + " ".join(f"{value:02X}" for value in allowed))
+    print(f"Test a=00..FF: at least one allowed e must satisfy S(a) XOR S(a XOR e) = {delta:02X}.")
+    for candidate in event['inputs']:
+        error = next(value for value in allowed if sm4.SBOX[candidate] ^ sm4.SBOX[candidate ^ value] == delta)
+        changed = candidate ^ error
+        print(f"  a={candidate:02X}, compatible e={error:02X}: S[{candidate:02X}] XOR S[{changed:02X}] = {sm4.SBOX[candidate]:02X} XOR {sm4.SBOX[changed]:02X} = {delta:02X}; rk byte = a XOR q = {candidate:02X} XOR {known:02X} = {candidate ^ known:02X}")
+    print(f"L-inverse difference: {event['delta_b']:08X}; candidates {event['before']} -> {event['remaining']}")
+    print("Survivors: " + " ".join(f"{value:02X}" for value in event['survivors']))
+    if event['remaining'] == 1:
+        value = event['survivors'][0]
+        recovered_bytes.setdefault(number, {})[byte] = value
+        print(terminal.paint(f"RECOVERED rk{number} byte {byte} = {value:02X} / UNIQUE", "32"))
+        if len(recovered_bytes[number]) == 4:
+            ordered = bytes(recovered_bytes[number][index] for index in range(4))
+            print("Assemble bytes in big-endian order: " + " || ".join(f"{v:02X}" for v in ordered))
+            print(terminal.paint(f"DFA ASSEMBLED rk{number} = {ordered.hex().upper()}", "1;32"))
+    terminal.pause()
+
+
+def show_aes_key_schedule(terminal, last_key):
+    """Explain every reversed AES word and assemble K9 down to K0."""
+    terminal.section("AES: REVERSE THE KEY SCHEDULE / K10 -> K0")
+    words = [None] * 44
+    words[40:] = [bytes(last_key[index:index+4]) for index in range(0, 16, 4)]
+    print("Start with the recovered K10: " + bytes(last_key).hex().upper())
+    print("w[i-4] = w[i] XOR T(w[i-1]); T is identity except at multiples of four.")
+
+    def report(index, current, transformed, previous):
+        if index % 4 == 0:
+            original = words[index-1]
+            rotated = original[1:] + original[:1]
+            substituted = bytes(aes.SBOX[value] for value in rotated)
+            print(f"  Schedule core: RotWord({original.hex().upper()}) = {rotated.hex().upper()}; SubWord = {substituted.hex().upper()}")
+            print(f"  Rcon[{index//4}] = {aes.RCON[index//4]:02X} in the first byte; T = {transformed.hex().upper()}")
+        else:
+            print(f"  T is identity: T(w[{index-1}]) = {transformed.hex().upper()}")
+        words[index-4] = previous
+        print(f"w[{index-4}] = w[{index}] XOR T(w[{index-1}]) = {current.hex().upper()} XOR {transformed.hex().upper()} = {previous.hex().upper()}")
+        if (index-4) % 4 == 0:
+            round_number = (index-4) // 4
+            round_key = b''.join(words[index-4:index])
+            print(terminal.paint(f"DERIVED K{round_number} = {round_key.hex().upper()}", "32"))
+        terminal.pause()
+
+    master = piret.reverse_key_schedule(last_key, observer=report)
+    print("Master key = w[0] || w[1] || w[2] || w[3] = " + terminal.paint(master.hex().upper(), "1;32"))
+    return master
+
+
 def sm4_demo(terminal, limit, start_byte=0):
     """Recover all four final subkeys through faults, then the complete key."""
     key, plaintext = block(sm4.KEY), block(sm4.PLAINTEXT)
@@ -132,18 +268,15 @@ def sm4_demo(terminal, limit, start_byte=0):
     print("Ciphertext: " + correct.hex().upper())
     terminal.section("SM4: FULL MASTER-KEY DFA / ROUNDS 31 -> 28")
     print("Controlled faults in EACH final round are required. No reference subkeys are supplied.")
+    print("For each byte: undo L, test S(a) XOR S(a XOR mask), then convert a to a subkey guess.")
+    print("Repeat independent faults and intersect guesses. Only one survivor identifies a byte.")
+    recovered_bytes = {}
 
     def oracle(number, byte, mask):
         return piret.sm4_fault_encrypt(plaintext, key, byte, mask, number)[0]
 
     def report(event):
-        print(f"\nRound {event['round']}, byte {event['byte']}, observation {event['observation']}, mask {event['mask']:02X}")
-        terminal.pair(bytes.fromhex(event['correct']), bytes.fromhex(event['faulty']))
-        print("Undo later rounds using ONLY previously recovered subkeys: " + str(event['peeled_with']))
-        terminal.pair(bytes.fromhex(event['clean_view']), bytes.fromhex(event['faulty_view']))
-        print(f"L-inverse difference: {event['delta_b']:08X}; candidates {event['before']} -> {event['remaining']}")
-        print("Survivors: " + " ".join(f"{value:02X}" for value in event['survivors']))
-        terminal.pause()
+        show_sm4_observation(terminal, event, recovered_bytes, start_byte)
 
     result = piret.recover_sm4_master_key(correct, oracle, range(1, limit+1), start_byte, observer=report)
     if not result['complete']:
@@ -151,9 +284,16 @@ def sm4_demo(terminal, limit, start_byte=0):
         return False
     for number, value in result['round_keys'].items():
         print(terminal.paint(f"DFA RECOVERED rk{number} = {value:08X} / PASS", "32"))
-    recovered = result['master_key']
-    if recovered != key or sm4.sm4_encrypt_block(plaintext, recovered) != correct:
+    recovered = show_sm4_key_schedule(terminal, result['round_keys'])
+    if recovered != result['master_key']:
+        raise RuntimeError("Displayed inverse schedule disagrees with the recovery engine.")
+    verified_ciphertext = sm4.sm4_encrypt_block(plaintext, recovered)
+    if recovered != key or verified_ciphertext != correct:
         raise RuntimeError("SM4 full master-key verification failed.")
+    terminal.section("SM4: VERIFY THE RECOVERED MASTER KEY")
+    print("Plaintext:                " + plaintext.hex().upper())
+    print("Expected ciphertext:      " + correct.hex().upper())
+    print("Recovered-key ciphertext: " + verified_ciphertext.hex().upper())
     print(terminal.paint("SM4 MASTER KEY: " + recovered.hex().upper() + " / PASS", "32"))
     print(f"{result['used']} faulty outputs. All four subkeys came from DFA, not references.")
     return True
@@ -186,7 +326,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except (KeyboardInterrupt, EOFError):
-        print("\nLesson stopped.")
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "run"))

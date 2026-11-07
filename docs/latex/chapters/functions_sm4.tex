@@ -1,0 +1,110 @@
+\section{\texttt{sm4.py}: function-by-function implementation}
+Read word rotations and the two distinct linear maps, then tau, observation semantics, round recurrence, key recurrence and common block processing. Unlike AES, each round returns a replacement four-word window. Encryption and decryption differ in subkey order.
+\subsection{\texttt{rotl}}
+\begin{lightcode}
+def rotl(val: int, count: int) -> int:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 71--73.
+\begin{enumerate}
+\item Accept a 32-bit word and a rotation count used by the fixed SM4 transforms. Shift left, mask the overflowing high bits and shift the original word right by 32-count.
+\item OR the two pieces to return a circular left rotation. The fixed call sites use counts two, ten, eighteen, twenty-four, thirteen and twenty-three.
+\end{enumerate}
+\subsection{\texttt{linear}}
+\begin{lightcode}
+def linear(b: int) -> int:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 76--82.
+\begin{enumerate}
+\item Take the 32-bit substituted data word B. Compute rotations by two, ten, eighteen and twenty-four using rotl.
+\item XOR B with all four rotations and return L(B). This map is XOR-linear, which permits differential inversion in the SM4 attacks.
+\end{enumerate}
+\subsection{\texttt{linear\_\allowbreak{}key}}
+\begin{lightcode}
+def linear_key(b: int) -> int:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 85--87.
+\begin{enumerate}
+\item Take a word from the key-schedule substitution.
+\item XOR it with rotations thirteen and twenty-three and return L-prime. The key schedule deliberately uses a different diffusion map from the data rounds.
+\end{enumerate}
+\subsection{\texttt{sbox}}
+\begin{lightcode}
+def sbox(a: int) -> int:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 90--94.
+\begin{enumerate}
+\item Pack the input word into four big-endian bytes using struct.pack.
+\item Substitute each byte through the SM4 SBOX and unpack the four bytes back into a 32-bit word. This implements tau without changing byte order.
+\end{enumerate}
+\subsection{\texttt{observe}}
+\begin{lightcode}
+def observe(observer, number, operation, value):
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 102--111.
+\begin{enumerate}
+\item If no observer exists, immediately return the original intermediate value. Otherwise call observer(number, operation, value).
+\item Retain the original value when the callback returns None, or return the replacement otherwise. Unlike AES matrix mutation, SM4 callbacks replace immutable integer, tuple or bytes values through this return channel.
+\end{enumerate}
+\subsection{\texttt{round}}
+\begin{lightcode}
+def round(x: list[int], rk: int, observer=None, round_index=0):
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 114--124.
+\begin{enumerate}
+\item Accept four rolling state words and the round subkey. Form the XOR of the three newest words and the subkey, then pass it through the Sbox input observation event.
+\item Apply sbox and linear with their observation events, XOR the result with the oldest word, and return the three newer words followed by this new word. The input list is not modified in place.
+\end{enumerate}
+\subsection{\texttt{generate\_\allowbreak{}round\_\allowbreak{}key}}
+\begin{lightcode}
+def generate_round_key(k: list[int], round: int) -> int:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 127--133.
+\begin{enumerate}
+\item Accept four consecutive schedule words and a zero-based round index. XOR the three newest words with CK at that index.
+\item Apply sbox and linear\_key, then XOR the oldest schedule word. Return one new 32-bit schedule word, which is the encryption subkey for that round.
+\end{enumerate}
+\subsection{\texttt{key\_\allowbreak{}expansion}}
+\begin{lightcode}
+def key_expansion(key: bytes) -> list[int]:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 141--154.
+\begin{enumerate}
+\item Reject keys whose length is not sixteen and unpack the master key as four big-endian words. XOR each with its FK constant to initialize the schedule.
+\item Generate and append thirty-two new words with generate\_round\_key on the sliding four-word window. Return only those thirty-two new words, excluding the initial whitened master-key words.
+\end{enumerate}
+\subsection{\texttt{sm4\_\allowbreak{}process\_\allowbreak{}block}}
+\begin{lightcode}
+def sm4_process_block(block: bytes, key: bytes, encrypt: bool, observer=None) -> bytes:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 162--178.
+\begin{enumerate}
+\item Validate the block, unpack four words and expand the key. For each of thirty-two iterations, select the forward subkey index for encryption or the reversed index for decryption.
+\item Observe the input state, call round, observe the output state, then reverse the four final words and pack them into bytes. Return the final observer result; reversing word order is not reversing the bytes inside each word.
+\end{enumerate}
+\subsection{\texttt{sm4\_\allowbreak{}encrypt\_\allowbreak{}block}}
+\begin{lightcode}
+def sm4_encrypt_block(x: bytes, key: bytes, observer=None) -> bytes:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 181--183.
+\begin{enumerate}
+\item Accept a raw sixteen-byte block, master key and optional observer.
+\item Delegate to sm4\_process\_block with encrypt=True and return its bytes. This wrapper supplies no attack parameters.
+\end{enumerate}
+\subsection{\texttt{sm4\_\allowbreak{}decrypt\_\allowbreak{}block}}
+\begin{lightcode}
+def sm4_decrypt_block(x: bytes, key: bytes, observer=None) -> bytes:
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 186--188.
+\begin{enumerate}
+\item Accept the ciphertext block, master key and optional observer.
+\item Delegate to sm4\_process\_block with encrypt=False, so the same data recurrence runs with reversed round keys. No inverse S-box or separate inverse data-round implementation is needed.
+\end{enumerate}
+\subsection{\texttt{main}}
+\begin{lightcode}
+def main():
+\end{lightcode}
+\noindent\textbf{Source:} complete \texttt{sm4.py} listing in Part 7, lines 196--207.
+\begin{enumerate}
+\item Decode the configured official hexadecimal vector and call the normal encrypt and decrypt wrappers.
+\item Print the three blocks and check the recovered block equals the plaintext. This verifies a round trip; known-answer tests additionally compare against the official ciphertext.
+\end{enumerate}

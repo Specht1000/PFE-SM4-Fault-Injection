@@ -208,4 +208,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "sm4"))

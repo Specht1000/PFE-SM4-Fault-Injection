@@ -1,0 +1,27 @@
+\chapter{AES-128: Encryption from the Beginning}
+\section{Block, key, and round structure}
+AES is a 128-bit block cipher. AES-128, AES-192, and AES-256 use 10, 12, and 14 rounds respectively. We focus on AES-128.
+\begin{center}\begin{tabular}{ll}\toprule Plaintext & \hex{00112233\allowbreak{}44556677\allowbreak{}8899AABB\allowbreak{}CCDDEEFF}\\Key \(K_0\)&\hex{00010203\allowbreak{}04050607\allowbreak{}08090A0B\allowbreak{}0C0D0E0F}\\Ciphertext&\hex{69C4E0D8\allowbreak{}6A7B0430\allowbreak{}D8CDB780\allowbreak{}70B4C55A}\\\bottomrule\end{tabular}\end{center}
+AES stores bytes in a \(4\times4\) \emph{column-major} state:
+\[\begin{pmatrix}00&44&88&CC\\11&55&99&DD\\22&66&AA&EE\\33&77&BB&FF\end{pmatrix}.\]
+First apply AddRoundKey with \(K_0\). Rounds 1--9 apply SubBytes, ShiftRows, MixColumns, AddRoundKey. Round 10 omits MixColumns.
+\section{Initial AddRoundKey}
+The state is XORed byte by byte with the first round key. For example, \(\hex{11}\xor\hex{01}=\hex{10}\). The result is
+\[\begin{pmatrix}00&40&80&C0\\10&50&90&D0\\20&60&A0&E0\\30&70&B0&F0\end{pmatrix}.\]
+\section{SubBytes}
+Each byte is independently replaced through the AES S-box. Examples: \(S(\hex{00})=\hex{63}\), \(S(\hex{10})=\hex{CA}\), \(S(\hex{20})=\hex{B7}\), \(S(\hex{30})=\hex{04}\). The resulting state is
+\[\begin{pmatrix}63&09&CD&BA\\CA&53&60&70\\B7&D0&E0&E1\\04&51&E7&8C\end{pmatrix}.\]
+The S-box is nonlinear: in general, \(S(a\xor b)\ne S(a)\xor S(b)\).
+\section{ShiftRows}
+Rows 0, 1, 2, 3 rotate left by 0, 1, 2, 3 bytes respectively:
+\[\begin{pmatrix}63&09&CD&BA\\53&60&70&CA\\E0&E1&B7&D0\\8C&04&51&E7\end{pmatrix}.\]
+\section{MixColumns}
+Every column is multiplied over \(GF(2^8)\) by
+\[M=\begin{pmatrix}02&03&01&01\\01&02&03&01\\01&01&02&03\\03&01&01&02\end{pmatrix}.\]
+For the first input column \((\hex{63},\hex{53},\hex{E0},\hex{8C})^T\),
+\[b_0=(02\cdot63)\xor(03\cdot53)\xor E0\xor8C.\]
+Multiplication is in the AES finite field, not ordinary integer arithmetic. For a separate illustrative column \((\hex{DB},\hex{13},\hex{53},\hex{45})^T\), MixColumns yields \((\hex{8E},\hex{4D},\hex{A1},\hex{BC})^T\). The first column of the official AES round-1 state becomes \((\hex{5F},\hex{72},\hex{64},\hex{15})^T\).
+\section{Round keys}
+AES-128 expands the original 16-byte key into eleven 16-byte round keys \(K_0,\ldots,K_{10}\). For this vector:
+\[K_1=\hex{D6AA74FD\allowbreak{}D2AF72FA\allowbreak{}DAA678F1\allowbreak{}D6AB76FE},\]
+\[K_{10}=\hex{13111D7F\allowbreak{}E3944A17\allowbreak{}F307A78B\allowbreak{}4D2B30C5}.\]

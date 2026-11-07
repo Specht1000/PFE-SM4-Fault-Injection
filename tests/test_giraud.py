@@ -16,6 +16,39 @@ import run as simulator
 
 
 class GiraudTests(unittest.TestCase):
+    def test_terminal_explains_full_schedules_in_both_bit_models(self):
+        import re
+        for algorithm in ('aes', 'sm4'):
+            for known_bit in (False, True):
+                with self.subTest(algorithm=algorithm, known_bit=known_bit):
+                    output = io.StringIO()
+                    arguments = ['--algorithm', algorithm, '--color', 'never'] + (['--known-bit'] if known_bit else [])
+                    with redirect_stdout(output):
+                        self.assertEqual(giraud.main(arguments), 0)
+                    text = output.getvalue()
+                    if algorithm == 'aes':
+                        keys = aes.key_expansion(bytes.fromhex(aes.KEY))
+                        derived = dict(re.findall(r'DERIVED K(\d+) = ([0-9A-F]{32})', text))
+                        self.assertEqual(derived, {str(i): aes.state_to_bytes(keys[i]).hex().upper() for i in range(10)})
+                        self.assertEqual(len(re.findall(r'RECOVERED K10 byte \d+ =', text)), 16)
+                        equations = re.findall(r'w\[\d+\] = w\[\d+\] XOR T\(w\[\d+\]\) = ([0-9A-F]{8}) XOR ([0-9A-F]{8}) = ([0-9A-F]{8})', text)
+                        self.assertEqual(len(equations), 40)
+                        for left, right, result in equations:
+                            self.assertEqual(int(left, 16) ^ int(right, 16), int(result, 16))
+                    else:
+                        keys = sm4.key_expansion(bytes.fromhex(sm4.KEY))
+                        derived = dict(re.findall(r'DERIVED rk(\d+) = ([0-9A-F]{8})', text))
+                        self.assertEqual(derived, {str(i): f'{keys[i]:08X}' for i in range(28)})
+                        for number in range(28, 32):
+                            self.assertIn(f'DFA ASSEMBLED rk{number} = {keys[number]:08X}', text)
+                        self.assertIn('MK[0] = K[0] XOR FK[0]', text)
+                    self.assertIn('Recovered-key ciphertext:', text)
+                    if not known_bit:
+                        self.assertIn('Allowed input errors: 01 02 04 08 10 20 40 80', text)
+                        self.assertIn('NOT given to the candidate solver', text)
+                    else:
+                        self.assertNotIn('Allowed input errors: 01 02 04 08 10 20 40 80', text)
+
     def test_terminal_main(self):
         output = io.StringIO()
         with redirect_stdout(output), patch("builtins.input", return_value=""):

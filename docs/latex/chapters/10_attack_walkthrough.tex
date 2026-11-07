@@ -1,0 +1,332 @@
+\chapter{Complete Code Walkthrough: Every Implemented Attack}
+\label{chap:all-attacks-code}
+This chapter documents all attack paths currently implemented for the two project ciphers, AES-128 and SM4. It connects the fault location, observable data, candidate equations, Python functions and recovery of the original 128-bit key. The excerpts are taken from the current repository source. The earlier numerical last-round examples remain useful illustrations; the selectable-round SM4 implementation extends their capabilities under an additional fault-control assumption.
+
+\section{Which attacks are implemented?}
+\begin{center}
+\small
+\begin{tabular}{P{.15\linewidth}P{.23\linewidth}P{.26\linewidth}P{.25\linewidth}}
+\toprule
+Cipher and model & Fault location & Solver knowledge & Full-key route\\\midrule
+AES Piret-style & Before round-9 MixColumns; also a round-8 variant & Correct/faulty ciphertexts and output group; unknown error magnitude and row & Recover all four $K_{10}$ quartets, then reverse the AES-128 schedule\\[2mm]
+AES Giraud & Before round-10 SubBytes & Correct/faulty ciphertexts; one bit, with optional exact mask & Recover all sixteen $K_{10}$ bytes, then reverse the AES-128 schedule\\[2mm]
+SM4 controlled-byte DFA & S-box input in rounds 31, 30, 29, 28 & Correct/faulty outputs and specified byte and XOR mask & Recover $rk_{31}$ down to $rk_{28}$, then reverse the SM4 schedule\\[2mm]
+SM4 Giraud-inspired & Same four SM4 rounds; one-bit masks & Correct/faulty outputs; one bit, with optional exact mask & Apply bit filtering, recover the four final subkeys and reverse the schedule\\
+\bottomrule
+\end{tabular}
+\end{center}
+\note{The SM4 byte attack lives in \texttt{piret.py}, but it is a controlled SM4 differential model, not the AES Piret equations applied unchanged. The SM4 single-bit model is likewise an adaptation of Giraud's filtering idea. The project does not implement every published fault attack, AES-192, or AES-256.}
+AES round numbers here are 1--10 after the initial key XOR; SM4 indices are zero-based, 0--31. Each model attacks encryption. Decryption in the GUI checks the normal cipher and is not a separate fault-recovery attack.
+
+\section{Normal cipher, simulated target, solver, and viewer}
+\begin{enumerate}
+\item \textbf{Normal cipher:} \texttt{aes.aes\_\allowbreak{}encrypt} and \texttt{sm4.sm4\_\allowbreak{}encrypt\_\allowbreak{}block} execute the actual algorithm. Their optional observers expose transformation events. Without an attack callback, these functions make no fault-dependent modification.
+\item \textbf{Target adapter:} the attack module attaches a callback that changes a chosen intermediate value. The adapter needs the simulation key to operate the target. This is analogous to a physical target possessing its own key.
+\item \textbf{Candidate solver:} it receives the observations allowed by its model, not the target's key or expanded schedule. Traces of hidden states are teaching data, not candidate-filter inputs.
+\item \textbf{Presentation and checks:} \texttt{gui.py} builds timelines, highlights differences in red, and checks the recovered key by re-encryption. A separate comparison with the known simulation key is a test of the experiment, not a source of recovered key bytes.
+\end{enumerate}
+\begin{center}
+\begin{tikzpicture}[node distance=5mm,box/.style={draw,rounded corners,fill=pale,text width=11cm,align=center,minimum height=8mm},>=Latex]
+\node[box] (a) {Normal encryption produces correct ciphertext $C$};
+\node[box,below=of a] (b) {External fault callback produces faulty ciphertexts $F_1,F_2,\ldots$};
+\node[box,below=of b] (c) {Model-specific equations produce candidate sets};
+\node[box,below=of c] (d) {Intersect observations until every required key group is unique};
+\node[box,below=of d] (e) {Reverse the key schedule and verify the recovered original key};
+\foreach \x/\y in {a/b,b/c,c/d,d/e}{\draw[->] (\x)--(\y);}
+\end{tikzpicture}
+\end{center}
+
+\section{AES Piret-style attack: code from injection to the master key}
+\subsection{Inject into the real AES implementation}
+\texttt{encrypt\_\allowbreak{}with\_\allowbreak{}trace} in \texttt{piret.py} installs an observer on \texttt{aes.aes\_\allowbreak{}encrypt}. The callback waits for \texttt{Before MixColumns} in the selected round and performs \texttt{state[row][column] \textasciicircum{}= mask}. It then saves immutable byte snapshots. A zero mask gives a clean trace; nonzero masks represent controlled software faults. The solver does not receive this mask.
+\par\smallskip\noindent\textbf{External Piret fault injection into the real AES engine}\par
+\begin{lightcode}
+def encrypt_with_trace(plaintext, key, row=0, column=0, mask=0, fault_round=8):
+    """Run aes.py itself; this external observer injects and records the fault.
+
+    Round 8 spreads to four key groups. Round 9 reaches one key quartet.
+    No second AES implementation is used by the attacker.
+    """
+    if not (0 <= row < 4 and 0 <= column < 4 and 0 <= mask <= 255 and fault_round in (8, 9)):
+        raise ValueError("Fault: row/column 0..3, mask 0..255, round 8 or 9.")
+    trace = []
+
+    def observer(number, operation, state):
+        if number == fault_round and operation == "Before MixColumns":
+            state[row][column] ^= mask
+            trace.append((number, "Fault point", aes.state_to_bytes(state)))
+        if number > 0 and operation.startswith("After "):
+            trace.append((number, operation[6:], aes.state_to_bytes(state)))
+
+    ciphertext = aes.aes_encrypt(plaintext, key, observer=observer)
+    return ciphertext, trace
+\end{lightcode}
+
+\subsection{Convert one output pair into four-byte key candidates}
+For column $c$, the output indices are $p_r=4((c-r)\bmod4)+r$, $r=0,1,2,3$. Under a guess $k_r$ for a final-key byte,
+\[
+d_r(k_r)=S^{-1}(C_{p_r}\xor k_r)\xor S^{-1}(F_{p_r}\xor k_r).
+\]
+The code first groups the 256 byte guesses by their resulting difference. It then enumerates the \emph{shared} unknown error row $q$ and error value $e$, requiring all four equations $d_r(k_r)=M_{r,q}e$ at once. The Cartesian product combines only compatible byte lists; it does not independently choose arbitrary surviving bytes. This preserves the quartet correlation without enumerating all $2^{32}$ quartets first.
+\par\smallskip\noindent\textbf{Piret candidate quartets with one shared row and error}\par
+\begin{lightcode}
+def key_candidates(correct, faulty, column):
+    """Derive four-byte K10 candidates from ciphertexts only.
+
+    For each guessed byte k, undo final AddRoundKey and SubBytes:
+      d = InvSbox[C[p] XOR k] XOR InvSbox[Cfault[p] XOR k].
+    All four differences must fit ONE matrix column times ONE unknown error.
+    """
+    if len(correct) != 16 or len(faulty) != 16:
+        raise ValueError("Ciphertexts must each contain exactly 16 bytes.")
+    # Each table maps a possible input difference d to compatible byte guesses.
+    # Four small lookups avoid brute-force enumeration of all 2^32 quartets.
+    tables = []
+    for position in output_positions(column):
+        table = [[] for _ in range(256)]
+        for guess in range(256):
+            delta = INV_SBOX[correct[position] ^ guess] ^ INV_SBOX[faulty[position] ^ guess]
+            table[delta].append(guess)
+        tables.append(table)
+    found = set()
+    for unknown_row in range(4):
+        for unknown_error in range(1, 256):
+            # A single shared row/error must satisfy ALL four equations.
+            # Independent byte filtering alone would lose this constraint.
+            choices = [tables[r][gf_multiply(MIX_MATRIX[r][unknown_row], unknown_error)] for r in range(4)]
+            found.update(product(*choices))
+    return found
+\end{lightcode}
+
+\subsection{Round 9 versus the supported round-8 variant}
+The GUI's \texttt{pdf\_\allowbreak{}aes\_\allowbreak{}lesson} and the terminal's \texttt{run.aes\_\allowbreak{}demo} use round 9. Each observation affects one output quartet. These functions intersect \texttt{key\_\allowbreak{}candidates} sets separately for all four columns and place the unique tuples back into their original $K_{10}$ byte positions.
+
+The direct \texttt{piret.py} AES command uses round 8. The additional round spreads the original byte disturbance to all four column groups; each final-round group still satisfies a round-9 one-byte-input differential equation with its own effective error. That effective error is not necessarily the original injected mask. \texttt{recover\_\allowbreak{}last\_\allowbreak{}key} therefore processes all four groups from each faulty output. Its explicit requirement that all sixteen ciphertext bytes change belongs to this round-8 path; it must not be imposed on round-9 observations.
+\par\smallskip\noindent\textbf{Round-8 AES recovery: intersect all four output groups}\par
+\begin{lightcode}
+def recover_last_key(correct, faulty_outputs, observer=None):
+    """Attacker API: no master key, plaintext, fault mask or internal states.
+
+    The optional observer is for logging only; it cannot modify candidate sets.
+    A None result means ambiguity, never an arbitrary candidate selection.
+    """
+    if len(correct) != 16:
+        raise ValueError("Correct ciphertext must contain 16 bytes.")
+    groups, used = [None] * 4, 0
+    for used, faulty in enumerate(faulty_outputs, 1):
+        if len(faulty) != 16 or any(a == b for a, b in zip(correct, faulty)):
+            raise ValueError("Expected 16 changed output bytes for the round-8 byte-fault model.")
+        for column in range(4):
+            fresh = key_candidates(correct, faulty, column)
+            before = None if groups[column] is None else len(groups[column])
+            # An intersection can retain/remove candidates, never introduce new ones.
+            groups[column] = fresh if groups[column] is None else groups[column] & fresh
+            if not groups[column]:
+                raise ValueError("Empty candidate intersection: incompatible ciphertexts or fault model.")
+            if observer:
+                observer(used, column, before, len(fresh), tuple(sorted(groups[column])))
+        if all(len(group) == 1 for group in groups):
+            # Group tuples are in pre-ShiftRows row order. Restore true K10 order.
+            last_key = bytearray(16)
+            for column in range(4):
+                for position, byte in zip(output_positions(column), next(iter(groups[column]))):
+                    last_key[position] = byte
+            return bytes(last_key), used
+    return None, used
+\end{lightcode}
+
+\subsection{Recover the original AES key}
+Once $K_{10}$ is unique, \texttt{reverse\_\allowbreak{}key\_\allowbreak{}schedule} initializes $w_{40},\ldots,w_{43}$ and walks downward. It computes each earlier word with XOR and the forward key-schedule transformation. It never reads the original key. The forward S-box is correct here because its input schedule word is already known.
+\par\smallskip\noindent\textbf{Reverse AES-128 expansion to recover the original key}\par
+\begin{lightcode}
+def reverse_key_schedule(last_key, observer=None):
+    """AES-128 recurrence reversed: w[i-4] = w[i] XOR transform(w[i-1]).
+
+    Descending order guarantees that both right-hand words are already known.
+    Reversal still uses the FORWARD S-box: its input word is known, so there
+    is no reason to invert SubWord. This function never reads the master key.
+    """
+    if len(last_key) != 16:
+        raise ValueError("K10 must contain 16 bytes.")
+    words = [None] * 44
+    # K10 occupies the final four schedule words, w40 through w43.
+    words[40:] = [list(last_key[index:index+4]) for index in range(0, 16, 4)]
+    for index in range(43, 3, -1):
+        transformed = words[index - 1][:]
+        if index % 4 == 0:
+            # Same RotWord/SubWord/Rcon transformation as forward expansion.
+            transformed = [SBOX[byte] for byte in transformed[1:] + transformed[:1]]
+            transformed[0] ^= aes.RCON[index // 4]
+        words[index - 4] = [a ^ b for a, b in zip(words[index], transformed)]
+        if observer:
+            observer(index, bytes(words[index]), bytes(transformed), bytes(words[index - 4]))
+    return bytes(sum(words[:4], []))
+\end{lightcode}
+
+If a group still has more than one candidate, the lesson reports ambiguity instead of guessing a key. Increasing the number of observations can help, but no fixed success count is guaranteed for every target state and fault sequence.
+
+\section{AES Giraud attack: one-bit filtering and complete recovery}
+\subsection{External fault before final SubBytes}
+\texttt{giraud.aes\_\allowbreak{}fault\_\allowbreak{}encrypt} changes one bit in the state immediately before final-round SubBytes. Byte index $b$ maps to \texttt{state[b \% 4][b // 4]}, consistent with AES column-major storage. Unlike the Piret fault, no MixColumns follows this location; one altered S-box input byte reaches one ciphertext byte after ShiftRows.
+\par\smallskip\noindent\textbf{External single-bit fault before final AES SubBytes}\par
+\begin{lightcode}
+def aes_fault_encrypt(plaintext, key, byte=0, mask=None):
+    """Interfere with the real aes.py execution before final SubBytes.
+
+    Only this attack callback changes the state. Without it AES is unchanged.
+    Snapshots are copies for teaching; they are never inputs to the solver.
+    """
+    if not 0 <= byte < 16:
+        raise ValueError("AES input byte must be 0..15.")
+    if mask is not None:
+        validate_mask(mask)
+    trace = {}
+
+    def observer(number, operation, state):
+        if number == 10 and operation == "Before SubBytes":
+            trace["Before fault"] = aes.state_to_bytes(state)
+            if mask is not None:
+                state[byte % 4][byte // 4] ^= mask
+            trace["Injected bit"] = aes.state_to_bytes(state)
+        if number == 10 and operation.startswith("After "):
+            name = "Ciphertext" if operation == "After AddRoundKey" else operation[6:]
+            trace[name] = aes.state_to_bytes(state)
+
+    ciphertext = aes.aes_encrypt(plaintext, key, observer=observer)
+    return ciphertext, trace
+\end{lightcode}
+
+\subsection{Why the filter works}
+\texttt{giraud.aes\_\allowbreak{}candidates}, listed in the implementation chapter, first requires exactly one changed output byte. For each $k\in\{0,\ldots,255\}$, it computes
+\[
+\delta(k)=S^{-1}(C_j\xor k)\xor S^{-1}(F_j\xor k).
+\]
+In unknown-bit mode, it keeps $k$ when $\delta(k)\in\{1,2,4,8,16,32,64,128\}$. In known-bit mode, it requires the stronger condition $\delta(k)=e$ for the supplied exact mask. A one-bit difference is required at the \emph{inverse-S-box input comparison}, not necessarily in the observed ciphertext XOR.
+
+\texttt{giraud.masks\_\allowbreak{}for} generates up to eight distinct single-bit observations per target byte. \texttt{giraud.intersect\_\allowbreak{}candidates} intersects the resulting sets. The terminal \texttt{main} and GUI \texttt{giraud\_\allowbreak{}lesson} repeat this for all sixteen input byte positions, use the observed output index after ShiftRows to assemble $K_{10}$, and call \texttt{piret.reverse\_\allowbreak{}key\_\allowbreak{}schedule}. Even after all eight masks, an ambiguous byte must remain reported as ambiguous. Knowing the fault location does not imply knowing its exact bit.
+
+\section{SM4 controlled-byte DFA: code and full-key extension}
+\subsection{Inject before tau and undo output diffusion}
+\texttt{piret.sm4\_\allowbreak{}fault\_\allowbreak{}encrypt} attaches an observer to \texttt{sm4.sm4\_\allowbreak{}encrypt\_\allowbreak{}block}. At \texttt{Sbox input}, it applies \texttt{mask << (24 - 8*byte)} to the 32-bit value. The shift preserves big-endian byte numbering. Its diagnostic trace may contain subkeys for teaching; the oracle passed to the solver returns only the faulty ciphertext.
+
+At target round $i$,
+\[
+A_i=X_{i+1}\xor X_{i+2}\xor X_{i+3}\xor rk_i,
+\qquad X_{i+4}=X_i\xor L(\tau(A_i)).
+\]
+When the round is last in the current view, only $X_{i+4}$ changes. Since $L$ is XOR-linear,
+\[
+\Delta B_i=L^{-1}(X_{i+4}\xor X'_{i+4}).
+\]
+\texttt{inverse\_\allowbreak{}rows} constructs the $32\times32$ binary matrix of $L$ and inverts it by Gaussian elimination. \texttt{inverse\_\allowbreak{}linear} applies the inverse through binary dot products. This is an inverse of the data diffusion map, not the key-schedule map $L'$.
+\subsection{Turn S-box input guesses into key-byte guesses}
+For the known fault byte $e$, enumerate $a$ satisfying $S(a)\xor S(a\xor e)=\Delta B_{i,b}$. Let $q$ be byte $b$ of $X_{i+1}\xor X_{i+2}\xor X_{i+3}$, available in the other three words of the view. Then a compatible subkey byte is $a\xor q$. The function validates the unchanged words and single-byte support of $\Delta B_i$ before filtering.
+\par\smallskip\noindent\textbf{Known-byte SM4 differential filtering}\par
+\begin{lightcode}
+def sm4_byte_candidates(correct, faulty, byte, mask):
+    """Attacker API: outputs and the PDF's KNOWN fault byte/value only."""
+    if len(correct) != 16 or len(faulty) != 16 or not 0 <= byte < 4 or not 1 <= mask <= 255:
+        raise ValueError("Invalid SM4 output or known-fault descriptor.")
+    c, f = struct.unpack(">4I", correct), struct.unpack(">4I", faulty)
+    if c[1:] != f[1:]:
+        raise ValueError("The last-round model requires three output words unchanged.")
+    delta_b = inverse_linear(c[0] ^ f[0])
+    shift = 24 - 8 * byte
+    if not delta_b or delta_b & ~(255 << shift):
+        raise ValueError("Difference does not match a single-byte S-box input fault.")
+    d = (delta_b >> shift) & 255
+    known = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+    inputs = {a for a in range(256) if sm4.SBOX[a] ^ sm4.SBOX[a ^ mask] == d}
+    return {a ^ known for a in inputs}, inputs, delta_b
+\end{lightcode}
+
+\subsection{Recover four subkeys instead of supplying three reference values}
+A single last-round experiment recovers at most $rk_{31}$, which is only 32 bits. The implemented \texttt{piret.recover\_\allowbreak{}sm4\_\allowbreak{}master\_\allowbreak{}key} extends the model:
+\begin{enumerate}
+\item Recover all four bytes of $rk_{31}$ using faults in round 31.
+\item Request new faulty outputs from round 30. Undo round 31 on \emph{both} correct and faulty outputs using the recovered $rk_{31}$.
+\item Apply the same last-round equations to this restored round-30 view to recover $rk_{30}$.
+\item Repeat at round 29, then round 28, undoing only later rounds whose keys have already been recovered.
+\item Pass the recovered keys in the order $[rk_{28},rk_{29},rk_{30},rk_{31}]$ to \texttt{reverse\_\allowbreak{}sm4}.
+\end{enumerate}
+For a rolling window $(X_{i+1},X_{i+2},X_{i+3},X_{i+4})$ and a known recovered $rk_i$, the previous word is
+\[
+X_i=X_{i+4}\xor L\bigl(\tau(X_{i+1}\xor X_{i+2}\xor X_{i+3}\xor rk_i)\bigr).
+\]
+This is the equation implemented by \texttt{peel\_\allowbreak{}sm4}, already listed in the implementation chapter. The returned view uses reversed word order so that \texttt{sm4\_\allowbreak{}byte\_\allowbreak{}candidates} can reuse its output equations. An earlier-round fault may affect several words of the \emph{raw} final ciphertext; the three-unchanged-word condition is checked after the appropriate peeling.
+
+The full recovery function's inputs are a correct output, a callable \texttt{fault\_\allowbreak{}oracle(round, byte, mask)}, and model configuration. It receives neither plaintext nor a key schedule. The oracle closure knows the simulation key only to run the target. If any byte remains ambiguous, the function returns \texttt{complete=False} and \texttt{master\_\allowbreak{}key=None}; it never peels an unrecovered round with a reference key.
+
+\texttt{reverse\_\allowbreak{}sm4} reverses $K_{i+4}=K_i\xor T'(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i)$, using $T'=L'\circ\tau$. After obtaining $K_0,\ldots,K_3$, it XORs the fixed $FK_i$ constants to recover the four original master-key words. Four consecutive round keys are required; knowledge of $rk_{31}$ alone is insufficient.
+
+\section{SM4 Giraud-inspired attack: reuse with a different filter}
+\texttt{giraud.sm4\_\allowbreak{}fault\_\allowbreak{}encrypt} validates that the simulator mask is a single bit, then reuses the actual SM4 target adapter. \texttt{giraud.sm4\_\allowbreak{}candidates}, listed earlier, computes $L^{-1}(\Delta X)$ and identifies the changed S-box byte. For each candidate input $a$, unknown-bit mode accepts it if
+\[
+\exists e\in\{1,2,4,8,16,32,64,128\}:\quad S(a)\xor S(a\xor e)=\Delta B_b.
+\]
+Known-bit mode tests only the specified $e$. The surviving $a$ values are converted to subkey candidates with the same observable-word XOR as the controlled-byte model.
+
+The following wrapper changes only the candidate filter. It keeps the sequential round recovery, intersections, peeling, and key-schedule reversal shared with the byte-DFA engine. In particular, the parameter \texttt{simulator\_\allowbreak{}mask} is deliberately not forwarded to \texttt{sm4\_\allowbreak{}candidates} in unknown-bit mode.
+\par\smallskip\noindent\textbf{Giraud-inspired SM4 wrapper with explicit mask knowledge}\par
+\begin{lightcode}
+def recover_sm4_master_key(correct, fault_oracle, first_mask=1, maximum=8, known_bit=False, start_byte=0, observer=None):
+    """Full SM4 recovery using single-bit filtering in rounds 31, 30, 29, 28."""
+    import piret
+
+    def candidate_filter(clean, faulty, simulator_mask):
+        # Unknown-bit mode deliberately does not pass the oracle's mask onward.
+        return sm4_candidates(clean, faulty, simulator_mask if known_bit else None)
+
+    return piret.recover_sm4_master_key(correct, fault_oracle, masks_for(first_mask, maximum), start_byte, candidate_filter, observer)
+\end{lightcode}
+
+This division explains why two attacks share a full-key recovery engine without being identical: the allowed error sets and the information supplied to the filter differ. Both require controlled faults at each of rounds 31--28 for full recovery in this implementation.
+
+\section{How the GUI maps to the attack code}
+Run \texttt{python src/gui.py} from the repository root. Select the algorithm and operation, load a standard example or enter a 16-byte hexadecimal key and block, then build the lesson.
+\begin{itemize}
+\item \textbf{Encrypt / Decrypt:} \texttt{aes\_\allowbreak{}trace} or \texttt{sm4\_\allowbreak{}trace} observes normal transformations. The inverse operation verifies the input block is recovered.
+\item \textbf{AES / Fault analysis:} \texttt{pdf\_\allowbreak{}aes\_\allowbreak{}lesson} uses the round-9 Piret path, processes all four columns and recovers $K_0$.
+\item \textbf{SM4 / Fault analysis:} \texttt{pdf\_\allowbreak{}sm4\_\allowbreak{}lesson} calls \texttt{sm4\_\allowbreak{}master\_\allowbreak{}lesson} with the known-byte filter.
+\item \textbf{Giraud attack:} \texttt{giraud\_\allowbreak{}lesson} uses the AES byte filter or routes SM4 to \texttt{sm4\_\allowbreak{}master\_\allowbreak{}lesson} with the single-bit filter. The exact-bit checkbox selects whether the solver receives the mask.
+\end{itemize}
+The GUI row/byte and column fields choose the initial demonstration coordinate, not a restriction to recovering only one key byte. The maximum-observation setting is per target group or byte. A lesson snapshot stores the round, operation, explanation, 16-byte displayed state, details and optional correct reference. Normal steps compare with the previous displayed state; fault steps compare with the corresponding correct state. Red nonzero XOR bytes visualize these comparisons. SM4 scalar intermediates $A$, $\tau(A)$ and $L(\tau(A))$ appear in the details; the rolling state does not change until the new word is appended.
+
+\section{Commands and verified default examples}
+\begin{lightcode}
+# GUI: both algorithms and both fault-analysis models
+python src/gui.py
+# AES round-8 Piret-style terminal lesson
+python src/piret.py --algorithm aes
+# AES round-9 Piret and controlled-byte SM4 DFA
+python src/run.py
+# Controlled-byte SM4 full master-key recovery
+python src/piret.py --algorithm sm4
+# Unknown-bit Giraud models (default)
+python src/giraud.py --algorithm aes
+python src/giraud.py --algorithm sm4
+# Stronger model: exact single-bit mask given to the solver
+python src/giraud.py --algorithm aes --known-bit
+python src/giraud.py --algorithm sm4 --known-bit
+\end{lightcode}
+On 7 November 2026, the following GUI lesson builders were executed directly without opening a window. Coordinates were zero, first mask was \hex{01}, maximum observations was eight, and Giraud used its default unknown-bit mode. The official inputs and keys given earlier were used.
+\begin{center}
+\small
+\begin{tabular}{P{.34\linewidth}rl}
+\toprule Lesson & Faulty outputs used & Recovered original key\\\midrule
+AES round-9 Piret & 8 & \hex{00010203\allowbreak{}04050607\allowbreak{}08090A0B\allowbreak{}0C0D0E0F}\\
+AES Giraud, unknown bit & 35 & \hex{00010203\allowbreak{}04050607\allowbreak{}08090A0B\allowbreak{}0C0D0E0F}\\
+SM4 known-byte DFA & 32 & \hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210}\\
+SM4 Giraud-inspired, unknown bit & 35 & \hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210}\\
+\bottomrule
+\end{tabular}
+\end{center}
+All four returned \texttt{verified=True}. These counts describe these particular deterministic examples, not a bound for arbitrary keys, plaintexts, masks or physical targets. Earlier terminal excerpts use the explicitly known-bit model, which explains why their counts can differ.
+
+\section{Validation and limits of the implementation}
+The regression suite checks known-answer vectors, inverse operations, fault propagation, candidate intersections, key-schedule reversal and ambiguous cases. \texttt{tests/test\_\allowbreak{}cipher\_\allowbreak{}separation.py} checks that the attacks intervene in the real cipher engines. \texttt{tests/test\_\allowbreak{}sm4\_\allowbreak{}full\_\allowbreak{}recovery.py} tests random keys with a precomputed output-only oracle and blocks \texttt{sm4.key\_\allowbreak{}expansion} while the recovery solver executes. This guards against accidentally obtaining the key from a reference schedule. \texttt{tests/test\_\allowbreak{}giraud.py} checks known/unknown-bit filtering and recovery for both algorithms.
+\begin{lightcode}
+python -m unittest discover -s tests -v
+python tests/test_crypto_lab.py --gui CryptoTests.test_gui
+\end{lightcode}
+The simulated observer is more precise than an uncharacterized physical glitch: it selects a round, intermediate value and bit/byte. No runtime trace or known test key is evidence that a ChipWhisperer glitch on STM32F303 satisfies that model. Physical evaluation must establish the observed fault support and location, then report useful-fault rate, ambiguity and key recovery separately. No additional hardware results are claimed by this code walkthrough.

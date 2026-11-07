@@ -1,0 +1,33 @@
+\chapter{Piret--Quisquater Differential Fault Analysis of AES}
+\section{Where the fault is injected}
+In the classic model used in the notes, one nonzero byte is corrupted at the \emph{input of MixColumns in round 9}, after SubBytes and ShiftRows. Both correct and faulty executions then proceed through round 9 and the final round.
+\begin{center}\begin{tikzpicture}[node distance=5mm, every node/.style={font=\small}, box/.style={draw,rounded corners,fill=pale,minimum width=8cm,minimum height=8mm},>=Latex]
+\node[box] (a) {Round 9: SubBytes $\to$ ShiftRows};
+\node[box,below=of a] (b) {Inject one-byte XOR fault};
+\node[box,below=of b] (c) {Round 9: MixColumns $\to$ AddRoundKey};
+\node[box,below=of c] (d) {Round 10: SubBytes $\to$ ShiftRows $\to$ AddRoundKey};
+\node[box,below=of d] (e) {Compare correct $C$ and faulty $F$};
+\foreach \x/\y in {a/b,b/c,c/d,d/e}{\draw[->] (\x)--(\y);}
+\end{tikzpicture}\end{center}
+\section{Propagation through MixColumns}
+If the first byte of a column changes by \(e\), the column difference after MixColumns is
+\[\Delta_{MC}=(02e,\ e,\ e,\ 03e)^T.\]
+For \(e=\hex{01}\), this is \((\hex{02},\hex{01},\hex{01},\hex{03})^T\). AddRoundKey does not alter XOR differences because both executions use the same round key. The final SubBytes transforms these differences nonlinearly; ShiftRows moves them into separate ciphertext positions.
+\section{Which ciphertext bytes are affected?}
+For the four round-9 columns, the affected ciphertext positions (in corresponding row order) are:
+\begin{center}\begin{tabular}{cc}\toprule Faulted column & Ciphertext byte positions\\\midrule 0&0, 13, 10, 7\\1&4, 1, 14, 11\\2&8, 5, 2, 15\\3&12, 9, 6, 3\\\bottomrule\end{tabular}\end{center}
+\section{Constructing candidates for the last AES round key}
+For an affected ciphertext position \(j\), and a guessed last-round key byte \(k\), compute
+\[d_j(k)=S^{-1}(C_j\xor k)\xor S^{-1}(F_j\xor k).\]
+Each byte has 256 candidate values. Four unknown key bytes have \(256^4=2^{32}\) possible combinations before filtering.
+Construct a set \(\mathcal D\) containing the MixColumns output differences for a single nonzero faulty byte in any of the four row positions:
+\[\mathcal D=\{M(e\mathbf e_r):r\in\{0,1,2,3\},\ e\in\{1,\ldots,255\}\}.\]
+This produces \(4\cdot255=1020\) four-byte difference patterns (not 1020 individual bytes). For each proposed key quartet, compute the four \(d_j(k)\) values in their correct \emph{pre-ShiftRows row order} and keep the quartet only if the resulting vector lies in \(\mathcal D\).
+\section{Intersecting observations}
+A single correct/faulty pair typically leaves multiple candidate key quartets. Repeat with independent faults in the same column and intersect the candidate sets:
+\[\mathcal K_{\mathrm{surviving}}=\mathcal K_1\cap\mathcal K_2\cap\cdots.\]
+Repeat across all four columns to recover the full 16-byte \(K_{10}\). The notes illustrate candidate filtering using a hypothetical quartet \((\hex{13},\hex{2B},\hex{A7},\hex{17})\); such pedagogical candidate examples should not be confused with a complete independently verified AES fault trace.
+\section{Reversing AES-128 key expansion}
+Let \(w_0,\ldots,w_{43}\) be 32-bit expanded-key words. For \(i\ge4\),
+\[w_i=\begin{cases}w_{i-4}\xor g(w_{i-1}),&i\equiv0\pmod4,\\w_{i-4}\xor w_{i-1},&\text{otherwise},\end{cases}\]
+where \(g(w)=\operatorname{SubWord}(\operatorname{RotWord}(w))\xor\operatorname{Rcon}\). In reverse, compute \(w_{i-4}\) by XORing \(w_i\) with the same known right-hand transformation. Begin with \(w_{40},\ldots,w_{43}\) from \(K_{10}\) and work backward to \(w_0,\ldots,w_3\), yielding \(K_0\). No inverse S-box is required for this reversal because the relevant inputs to \(g\) are already known.
