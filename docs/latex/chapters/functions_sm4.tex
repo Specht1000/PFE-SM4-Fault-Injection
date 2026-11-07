@@ -1,5 +1,19 @@
 \section{\texttt{sm4.py}: function-by-function implementation}
 Read word rotations and the two distinct linear maps, then tau, observation semantics, round recurrence, key recurrence and common block processing. Unlike AES, each round returns a replacement four-word window. Encryption and decryption differ in subkey order.
+
+\subsection{Implementation topics and presentation order}
+\begin{enumerate}
+\item \textbf{Inputs, words and constants.} Introduce the sixteen-byte block/key, four big-endian words, thirty-two rounds, SM4 \texttt{SBOX}, \texttt{FK}, \texttt{CK} and word mask. The SM4 S-box is not the AES S-box.
+\item \textbf{Circular rotation.} Explain \texttt{rotl}, its shift/mask operations and how wrapped bits re-enter the word. Follow one 32-bit input through a rotation before introducing the diffusion formulas.
+\item \textbf{Substitution and diffusion.} Explain \texttt{sbox} as four independent byte substitutions. Compare \texttt{linear}, using rotations 2, 10, 18 and 24, with \texttt{linear\_key}, using rotations 13 and 23. These maps serve different recurrences.
+\item \textbf{Key schedule.} Follow \texttt{generate\_round\_key} and \texttt{key\_expansion}: XOR the master words with FK, slide a four-word window, incorporate CK and generate $rk_0$ through $rk_{31}$.
+\item \textbf{One data round.} Trace \texttt{round}: compute $A=X_{i+1}\xor X_{i+2}\xor X_{i+3}\xor rk_i$, then $B=\tau(A)$, $D=L(B)$ and $X_{i+4}=X_i\xor D$. Return the updated four-word window.
+\item \textbf{Observation mechanism.} Explain \texttt{observe}: an absent callback preserves the value, None preserves it too, and another returned value replaces it. This is how an external experiment can intervene without embedding an attack model in normal SM4.
+\item \textbf{Complete encryption and decryption.} Follow \texttt{sm4\_process\_block}, \texttt{sm4\_encrypt\_block} and \texttt{sm4\_decrypt\_block}. Explain thirty-two updates, final word reversal and reverse subkey order for decryption. Word reversal does not reverse the bytes inside each word.
+\item \textbf{Verification and demonstration.} Use \texttt{main} and the official ciphertext to validate the result, then check recovery of the input. Explain that this is a raw-block implementation; message padding and authenticated modes are outside these functions. Terminal logging is handled by the shared wrapper.
+\end{enumerate}
+\noindent\textbf{Suggested explanation sequence:} block $\rightarrow$ four words $\rightarrow$ key expansion $\rightarrow$ XOR $\rightarrow$ substitution $\rightarrow$ diffusion $\rightarrow$ rolling update $\rightarrow$ final reversal.
+
 \subsection{\texttt{rotl}}
 \begin{lightcode}
 def rotl(val: int, count: int) -> int:

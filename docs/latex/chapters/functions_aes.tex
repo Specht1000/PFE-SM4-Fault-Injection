@@ -1,5 +1,19 @@
 \section{\texttt{aes.py}: function-by-function implementation}
 Read conversion first, then field arithmetic, transformations, key expansion, encryption and inverse operations. Matrix transformations mutate their argument and return None; block functions return immutable bytes. The operation wrapper is the only generic instrumentation seam.
+
+\subsection{Implementation topics and presentation order}
+\begin{enumerate}
+\item \textbf{Inputs and constants.} Introduce the sixteen-byte plaintext and key, ten rounds, \texttt{SBOX}, inverse table, \texttt{RCON} and mixing matrices. Separate editable example inputs from the explicit arguments of the reusable block functions.
+\item \textbf{State representation.} Follow \texttt{validate\_block}, \texttt{bytes\_to\_state} and \texttt{state\_to\_bytes}. Explain the column-major rule $j=4c+r$, using one input byte to show why serialization order matters.
+\item \textbf{Finite-field arithmetic.} Explain \texttt{xtime} before \texttt{gf\_mul}: shifts, overflow detection, reduction by the AES polynomial and XOR accumulation. Contrast this with ordinary integer multiplication.
+\item \textbf{Round transformations.} Explain \texttt{sub\_bytes}, \texttt{shift\_rows}, \texttt{mix\_column}, \texttt{mix\_columns} and \texttt{add\_round\_key}. State which operation changes byte values, moves their positions, mixes a column or incorporates a key. These transformations modify the working matrix in place.
+\item \textbf{Key expansion.} Follow \texttt{rot\_word}, \texttt{sub\_word} and \texttt{key\_expansion}. Show how four initial words become forty-four words and eleven keys, with a special transformation on every fourth word.
+\item \textbf{Encryption control flow.} Walk through \texttt{aes\_encrypt}: initial K0 XOR, nine full rounds, and round ten without MixColumns. Explain how \texttt{\_operation} surrounds transformations with observation events while keeping fault rules outside the cipher.
+\item \textbf{Decryption.} Follow \texttt{inv\_shift\_rows}, \texttt{inv\_sub\_bytes}, \texttt{inv\_mix\_columns} and \texttt{aes\_decrypt}. Show the reversed operation/key order and distinguish decrypting with a known key from recovering an unknown key.
+\item \textbf{Verification and demonstration.} Explain \texttt{main}, compare the official ciphertext with the implementation result and check that decryption recovers the plaintext. A round trip alone does not replace a known-answer test. Direct terminal execution also uses the shared logging wrapper.
+\end{enumerate}
+\noindent\textbf{Suggested explanation sequence:} input bytes $\rightarrow$ state matrix $\rightarrow$ expanded keys $\rightarrow$ round transformations $\rightarrow$ ciphertext $\rightarrow$ inverse operations $\rightarrow$ verification.
+
 \subsection{\texttt{validate\_\allowbreak{}block}}
 \begin{lightcode}
 def validate_block(data, label="Block"):

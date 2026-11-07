@@ -1,5 +1,20 @@
 \section{\texttt{piret.py}: function-by-function implementation}
 Read public differential helpers, external target adapters, SM4 inversion/filtering/peeling, AES quartet filtering and reverse schedules before terminal formatting. Keep the legacy known-key relation lesson separate from the ciphertext-only recovery paths.
+
+\subsection{Implementation topics and presentation order}
+\begin{enumerate}
+\item \textbf{Experimental roles.} Separate the normal cipher, key-owning simulated target, ciphertext-based solver and teaching display. Explain why showing a hidden state for learning does not permit giving it to the solver.
+\item \textbf{Differential helpers.} Explain \texttt{difference}, \texttt{clone}, \texttt{gf\_multiply} and \texttt{predicted\_mixcolumns\_difference}. For a row-zero fault, derive the four-byte pattern $(2e,e,e,3e)$ in the AES field.
+\item \textbf{AES fault injection.} Follow \texttt{encrypt\_with\_trace} and its observer before MixColumns. Compare round nine, which reaches one quartet, with round eight, which reaches all four groups. \texttt{trace\_round8} is a compatibility name that also accepts an explicit round-nine request.
+\item \textbf{AES candidate construction.} Explain \texttt{output\_positions} and \texttt{key\_candidates}: undo the final key XOR/S-box under each guess, match a shared error row and magnitude, and retain correlated four-byte tuples. Independent byte guesses are insufficient.
+\item \textbf{AES complete key recovery.} Explain per-column intersections in the round-nine lesson and \texttt{recover\_last\_key} for the round-eight path. Once K10 is unique, follow \texttt{reverse\_key\_schedule} to K0 and verify by re-encryption. Keep the known-key \texttt{relation\_demo} distinct from unknown-key reconstruction.
+\item \textbf{SM4 controlled-byte model.} Follow \texttt{sm4\_fault\_encrypt}, \texttt{inverse\_rows}, \texttt{inverse\_linear} and \texttt{sm4\_byte\_candidates}. Undo L, test S-box input candidates using the known byte mask, and convert them to subkey-byte guesses using the observable words.
+\item \textbf{SM4 multi-round recovery.} Follow \texttt{peel\_sm4} and \texttt{recover\_sm4\_master\_key}. Recover $rk_{31}$ through $rk_{28}$ using fresh faults at each target round and only previously recovered later keys. Explain the additional selectable-round fault assumption.
+\item \textbf{Master-key reconstruction and output.} Follow \texttt{reverse\_sm4}, remove FK and assemble the original master key. Earlier SM4 subkeys are derived by the reversed schedule, whereas the final four came from DFA. Explain \texttt{Terminal}, \texttt{main}, red differences, step mode and shared TXT/HTML logging.
+\item \textbf{Ambiguity and failure.} Distinguish an incompatible empty intersection from multiple compatible survivors. Neither case permits filling missing bytes from the teaching key or claiming successful complete recovery.
+\end{enumerate}
+\noindent\textbf{Suggested explanation sequence:} fault location $\rightarrow$ observed difference $\rightarrow$ candidate equations $\rightarrow$ intersections $\rightarrow$ recovered subkeys $\rightarrow$ inverse schedule $\rightarrow$ verified master key.
+
 \subsection{\texttt{difference}}
 \begin{lightcode}
 def difference(a, b):

@@ -1,0 +1,231 @@
+% Standalone didactic analysis of AES-128 and SM4.
+% Build with:  python make_analysis.py   (from the repository root)
+% The data file analysis/data.tex is generated from src/aes.py and src/sm4.py.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,xcolor,float,hyperref}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+
+% Cell macro used by the generated S-box heatmaps: column, row, blue shade, hex.
+\newcommand{\sbc}[4]{%
+  \fill[blue!#3] (#1,-#2) rectangle +(1,-1);
+  \node[font=\tiny\ttfamily,text=black] at (#1+0.5,-#2-0.5) {#4};}
+
+% TikZ styles for the structure diagrams.
+\tikzset{
+  op/.style={draw,rounded corners,minimum width=3.4cm,minimum height=0.7cm,fill=blue!8,font=\small},
+  io/.style={draw,rounded corners,minimum width=3.4cm,minimum height=0.7cm,fill=green!10,font=\small\bfseries},
+  keyb/.style={draw,rounded corners,minimum width=1.9cm,minimum height=0.6cm,fill=orange!15,font=\footnotesize},
+  flow/.style={-{Stealth[length=2mm]},thick},
+}
+
+\input{analysis/data.tex}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries AES-128 and SM4 --- Algorithm Analysis}\\[2pt]
+  {\large A didactic, data-driven overview}\\[4pt]
+  {\footnotesize PFE 5A --- generated from the project's own \texttt{src/aes.py} and \texttt{src/sm4.py}}
+\end{center}
+\vspace{4pt}
+\hrule
+\vspace{10pt}
+
+This document is produced by \texttt{make\_analysis.py}: it runs the project's
+Python implementations, measures how each cipher behaves, and draws the results.
+Every number and every S-box value below comes from the actual code, not from a
+textbook table. It covers the \emph{ciphers} only --- their structure and their
+diffusion properties --- and contains no fault-injection or key-recovery material.
+
+%====================================================================
+\section{AES-128 at a glance}
+%====================================================================
+
+AES-128 encrypts a 128-bit block in ten rounds. The block is held as a
+\textbf{4$\times$4 matrix of bytes} (the \emph{state}), filled column by column:
+byte index $i$ sits at row $i \bmod 4$, column $i \div 4$. Each round mixes the
+state with four operations; the final round omits MixColumns.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=5mm]
+  \node[io] (pt) {Plaintext (16 bytes)};
+  \node[op,below=of pt] (ark0) {AddRoundKey ($K_0$)};
+  \node[op,below=of ark0] (sb) {SubBytes};
+  \node[op,below=of sb] (sr) {ShiftRows};
+  \node[op,below=of sr] (mc) {MixColumns};
+  \node[op,below=of mc] (ark) {AddRoundKey ($K_r$)};
+  \node[op,below=8mm of ark] (fsb) {SubBytes};
+  \node[op,below=of fsb] (fsr) {ShiftRows};
+  \node[op,below=of fsr] (fark) {AddRoundKey ($K_{10}$)};
+  \node[io,below=of fark] (ct) {Ciphertext (16 bytes)};
+  \foreach \a/\b in {pt/ark0,ark0/sb,sb/sr,sr/mc,mc/ark,ark/fsb,fsb/fsr,fsr/fark,fark/ct}
+    \draw[flow] (\a) -- (\b);
+  % round-1..9 bracket
+  \begin{scope}[on background layer]
+    \node[draw,dashed,rounded corners,fit=(sb)(ark),inner sep=3mm,label=right:{\footnotesize $\times\,9$ rounds}] {};
+    \node[draw,dashed,rounded corners,fit=(fsb)(fark),inner sep=3mm,label=right:{\footnotesize final round (no MixColumns)}] {};
+  \end{scope}
+\end{tikzpicture}
+\caption{The AES-128 encryption flow. Nine full rounds, then a final round.}
+\end{figure}
+
+\noindent\textbf{Known-answer check.} With key \texttt{000102\dots0E0F} and
+plaintext \texttt{001122\dots EEFF}, the code produces ciphertext
+\texttt{\AEScipher}, matching the FIPS 197 example.
+
+%====================================================================
+\section{The AES S-box}
+%====================================================================
+
+SubBytes replaces every byte through one fixed 16$\times$16 lookup table --- the
+only non-linear step in AES. The heatmap shades each entry by its value (light =
+low, dark = high); rows are the high nibble, columns the low nibble.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[scale=0.42]
+  \AESsboxgrid
+  \foreach \c in {0,...,15} \node[font=\tiny] at (\c+0.5,0.4) {\texttt{\c}};
+  \foreach \r in {0,...,15} \node[font=\tiny] at (-0.5,-\r-0.5) {\texttt{\r}};
+\end{tikzpicture}
+\caption{AES S-box. Bijective (a permutation of all 256 bytes). Fixed points: \AESfixed.}
+\end{figure}
+
+A good substitution box is a bijection with no fixed point ($S(x)=x$) and no
+opposite fixed point; the AES S-box satisfies this, which is one reason a
+one-byte change never ``stays put''.
+
+%====================================================================
+\section{Diffusion --- how one bit spreads}
+%====================================================================
+
+Flip a single bit of the plaintext and compare, after every round, against the
+unmodified encryption. Two measurements: how many of the 16 \textbf{bytes}
+differ, and the Hamming distance in \textbf{bits} (out of 128). Full diffusion
+means about half the bits (64) differ --- an attacker learns nothing from the
+output about which bit changed.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}
+\begin{axis}[width=13cm,height=6.2cm,ymin=0,ymax=128,
+   xlabel={round},ylabel={bits differing / 128},
+   xtick={0,1,2,3,4,5,6,7,8,9,10},ytick={0,32,64,96,128},
+   grid=both,legend pos=south east,legend cell align=left]
+  \addplot[blue,mark=*,thick] coordinates {\AESavalanche};
+  \addlegendentry{bits (of 128)}
+  \draw[red,dashed] (axis cs:0,64) -- (axis cs:10,64);
+\end{axis}
+\end{tikzpicture}
+\caption{AES avalanche effect. One flipped input bit reaches \AESbitsreached\ bits
+after round~1 and about half (\AESbitsfull) by round~2.}
+\end{figure}
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}
+\begin{axis}[width=13cm,height=4.6cm,ymin=0,ymax=16,
+   xlabel={round},ylabel={bytes differing / 16},
+   xtick={0,1,2,3,4,5,6,7,8,9,10},ytick={0,4,8,12,16},
+   grid=both,ybar,bar width=7pt]
+  \addplot[fill=blue!40] coordinates {\AESbytes};
+\end{axis}
+\end{tikzpicture}
+\caption{Byte diffusion: MixColumns spreads one changed byte to a full column
+(4 bytes) in round~1, and ShiftRows + MixColumns reach all 16 bytes by round~2.}
+\end{figure}
+
+%====================================================================
+\section{SM4 at a glance}
+%====================================================================
+
+SM4 is the Chinese national block cipher (GB/T 32907). It also works on 128-bit
+blocks, but is built as a \textbf{32-round Feistel-like network} on four 32-bit
+words $X_0,X_1,X_2,X_3$. Each round replaces the oldest word:
+\[
+  X_{i+4} \;=\; X_i \,\oplus\, T\!\left(X_{i+1}\oplus X_{i+2}\oplus X_{i+3}\oplus rk_i\right),
+\]
+where $T = L(\tau(\cdot))$: $\tau$ applies the S-box to each of the four bytes,
+and $L$ mixes them with rotations $L(b)=b\oplus(b\lll2)\oplus(b\lll10)\oplus(b\lll18)\oplus(b\lll24)$.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=6mm and 10mm]
+  \node[keyb] (x0) {$X_i$};
+  \node[keyb,right=of x0] (x1) {$X_{i+1}$};
+  \node[keyb,right=of x1] (x2) {$X_{i+2}$};
+  \node[keyb,right=of x2] (x3) {$X_{i+3}$};
+  \node[keyb,fill=orange!25,below=14mm of x2] (rk) {$rk_i$};
+  \node[draw,circle,inner sep=1pt,below=7mm of x1] (xor1) {$\oplus$};
+  \node[op,below=20mm of x1,minimum width=2.2cm] (T) {$T = L\circ\tau$};
+  \node[draw,circle,inner sep=1pt,left=of T] (xor2) {$\oplus$};
+  \node[keyb,below=12mm of x0] (nx) {$X_{i+4}$};
+  \draw[flow] (x1) -- (xor1); \draw[flow] (x2) |- (xor1); \draw[flow] (x3) |- (xor1);
+  \draw[flow] (rk) -- (xor1);
+  \draw[flow] (xor1) -- (T);
+  \draw[flow] (T) -- (xor2);
+  \draw[flow] (x0) |- (xor2);
+  \draw[flow] (xor2) -- (nx);
+\end{tikzpicture}
+\caption{One SM4 round. After 32 rounds the ciphertext is $(X_{35},X_{34},X_{33},X_{32})$.}
+\end{figure}
+
+\noindent\textbf{Known-answer check.} With key and plaintext both
+\texttt{0123\dots3210}, the code produces \texttt{\SMfourcipher}.
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}[scale=0.42]
+  \SMfoursboxgrid
+  \foreach \c in {0,...,15} \node[font=\tiny] at (\c+0.5,0.4) {\texttt{\c}};
+  \foreach \r in {0,...,15} \node[font=\tiny] at (-0.5,-\r-0.5) {\texttt{\r}};
+\end{tikzpicture}
+\caption{SM4 S-box, shaded by value. Bijective. Fixed points: \SMfourfixed.}
+\end{figure}
+
+\begin{figure}[H]\centering
+\begin{tikzpicture}
+\begin{axis}[width=14cm,height=6cm,ymin=0,ymax=128,
+   xlabel={round (1--32)},ylabel={bits differing / 128},
+   xtick={1,4,8,12,16,20,24,28,32},ytick={0,32,64,96,128},
+   grid=both]
+  \addplot[blue,mark=*,mark size=1pt,thick] coordinates {\SMfouravalanche};
+  \draw[red,dashed] (axis cs:1,64) -- (axis cs:32,64);
+\end{axis}
+\end{tikzpicture}
+\caption{SM4 avalanche effect across its 32 rounds. Diffusion builds more
+gradually than AES because each round changes only one 32-bit word.}
+\end{figure}
+
+%====================================================================
+\section{AES vs.\ SM4 --- summary}
+%====================================================================
+
+\begin{table}[H]\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \textbf{AES-128} & \textbf{SM4} \\
+\midrule
+Block / key size & 128 / 128 bits & 128 / 128 bits \\
+Structure        & Substitution--permutation & Feistel-like network \\
+Rounds           & 10 & 32 \\
+State            & 4$\times$4 bytes & four 32-bit words \\
+Non-linear step  & S-box (SubBytes) & S-box ($\tau$) \\
+Linear step      & ShiftRows + MixColumns & rotations $L$ \\
+S-box fixed points & \AESfixed & \SMfourfixed \\
+\bottomrule
+\end{tabular}
+\caption{Side-by-side structure, with S-box fixed points measured from the code.}
+\end{table}
+
+\vfill
+\noindent\footnotesize\emph{Reproducibility:} rerun \texttt{python make\_analysis.py}
+to regenerate \texttt{analysis/data.tex} and rebuild this PDF. All figures are
+redrawn from the current \texttt{src/} implementations.
+
+\end{document}

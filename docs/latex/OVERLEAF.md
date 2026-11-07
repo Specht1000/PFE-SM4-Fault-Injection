@@ -69,3 +69,11 @@ verified because a LaTeX engine is not installed in the current environment.
 
 `Underfull` and `Overfull` messages are layout warnings, separate from a timeout
 or fatal compilation error.
+
+## Existing projects with a nested upload
+
+If the project files are inside `overleaf_project/` while the compiler still
+tries `main.tex` at root, no document can be opened. PFE Overleaf Auto Sync
+1.0.3 creates and selects a managed `pfe_sync_entry.tex` at root, sets the nested
+input search path and attempts a build after the initial synchronization.
+This preserves the existing folder structure and institution logos.

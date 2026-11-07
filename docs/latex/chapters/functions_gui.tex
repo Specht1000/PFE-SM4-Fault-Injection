@@ -374,13 +374,3 @@ After installing the report, \texttt{render} displays a snapshot and \texttt{fil
 \item[Recovery outputs:] complete keys are returned only after uniqueness. SM4 reports include \texttt{complete}, \texttt{master\_\allowbreak{}key}, \texttt{round\_\allowbreak{}keys}, \texttt{history}, \texttt{candidate\_\allowbreak{}counts} and \texttt{used}. Incomplete recovery returns no master key, even if some subkeys are already known.
 \item[Errors:] invalid sizes/masks and incompatible differential support raise \texttt{ValueError}; failed verification raises \texttt{RuntimeError}. A compatible but nonunique intersection is reported as ambiguity rather than being mislabeled an exception or a successful key guess.
 \end{description}
-
-\section{Worked reading exercises}
-\begin{enumerate}
-\item Follow one AES byte from input index one through \texttt{bytes\_\allowbreak{}to\_\allowbreak{}state}, initial AddRoundKey, SubBytes and ShiftRows. Explain why its flat output index changes even though SubBytes itself does not move bytes.
-\item Compare \texttt{gf\_\allowbreak{}mul} with integer multiplication and \texttt{linear} with \texttt{linear\_\allowbreak{}key}. Identify the exact call sites that would become wrong if either pair were interchanged.
-\item At one round-nine Piret observation, read the four tables in \texttt{key\_\allowbreak{}candidates}. Check that every surviving quartet shares one error row and one error magnitude; explain why four separately plausible bytes do not necessarily form a valid quartet.
-\item Run a Giraud byte pair through \texttt{aes\_\allowbreak{}candidates} twice: with \texttt{known\_\allowbreak{}mask=None} and with the exact mask. Identify the allowed difference set in each case and why the stronger filter can leave fewer candidates.
-\item In SM4, follow the first \texttt{recover\_\allowbreak{}sm4\_\allowbreak{}master\_\allowbreak{}key} event for round thirty and inspect \texttt{peeled\_\allowbreak{}with}. It must contain recovered round thirty-one, not reference round thirty or the original master key.
-\item In the GUI, compare an ordinary transformation snapshot with a fault snapshot. Explain why changing from the previous state is not the same measurement as a faulty-versus-correct state difference, even though both use an XOR and red highlights.
-\end{enumerate}

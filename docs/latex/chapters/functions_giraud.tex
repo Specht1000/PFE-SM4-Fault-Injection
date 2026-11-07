@@ -1,5 +1,20 @@
 \section{\texttt{giraud.py}: function-by-function implementation}
 Read one-bit validation, target adapters, per-pair candidate tests, intersections and orchestration. Exact-mask knowledge is an optional stronger model. The shared SM4 engine is reused through a candidate-filter callback, not by importing hidden key material.
+
+\subsection{Implementation topics and presentation order}
+\begin{enumerate}
+\item \textbf{Single-bit assumption.} Introduce \texttt{SINGLE\_BITS}, \texttt{validate\_mask} and \texttt{masks\_for}. A valid fault flips exactly one input bit. Unknown-bit mode knows the error belongs to the eight-mask set; known-bit mode receives the exact mask.
+\item \textbf{AES target adapter.} Follow \texttt{aes\_fault\_encrypt}: intervene before final-round SubBytes, map a flat byte to matrix coordinates and save snapshots. No later MixColumns follows this point, so the fault reaches one output byte after ShiftRows.
+\item \textbf{AES inverse-S-box test.} Explain \texttt{aes\_candidates}: for every guessed final-key byte, evaluate $S^{-1}(C_j\xor k)\xor S^{-1}(F_j\xor k)$. Require a permitted one-bit input difference, not necessarily a one-bit ciphertext XOR.
+\item \textbf{Intersections and AES key assembly.} Explain \texttt{intersect\_candidates} and \texttt{recover\_byte}. Repeat observations at the same output position, assemble all sixteen unique K10 bytes in output order, and reverse the AES schedule. More than one survivor means the byte remains unresolved.
+\item \textbf{SM4 single-bit adaptation.} Follow \texttt{sm4\_fault\_encrypt} and \texttt{sm4\_candidates}. Undo L before the S-box differential test, identify its affected byte, enumerate compatible inputs and convert them into subkey-byte candidates.
+\item \textbf{Filter knowledge.} Explain the nested \texttt{candidate\_filter} inside \texttt{recover\_sm4\_master\_key}. It forwards the simulator mask only in known-bit mode. Unknown-bit filtering must test all eight possible bit errors even if the teaching display reveals which bit was actually injected.
+\item \textbf{SM4 full recovery.} Explain reuse of the shared DFA engine: recover $rk_{31}$, undo recovered later rounds, then recover $rk_{30}$, $rk_{29}$ and $rk_{28}$. Reverse the schedule and remove FK to recover the master key. This is a Giraud-inspired SM4 model, not the unchanged AES attack.
+\item \textbf{Terminal orchestration.} Follow \texttt{main}, its output-only oracle and display callbacks. Explain candidate equations, unique-byte notifications, restored views, inverse-schedule steps and final re-encryption. Compare \texttt{--known-bit}, \texttt{--step} and \texttt{--color}; logs mirror the execution to TXT and colored HTML.
+\item \textbf{Verification and scope.} Check full recovery only after uniqueness and compare against the normal cipher output. Distinguish the controlled software experiment from uncharacterized physical glitches on STM32F303.
+\end{enumerate}
+\noindent\textbf{Suggested explanation sequence:} one-bit fault $\rightarrow$ allowed error set $\rightarrow$ inverse nonlinear test $\rightarrow$ candidate intersection $\rightarrow$ full subkey recovery $\rightarrow$ master-key verification.
+
 \subsection{\texttt{validate\_\allowbreak{}mask}}
 \begin{lightcode}
 def validate_mask(mask):

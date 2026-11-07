@@ -6,9 +6,17 @@
 % The part_XX.tex entry points below also select these parts automatically.
 \providecommand{\ReportPart}{1}
 \newif\ifshowpart
+% Explanatory parts (1..5): included in the complete report (ReportPart=0).
 \newcommand{\SelectPart}[1]{%
   \showpartfalse
   \ifnum\ReportPart=0\relax\showparttrue\fi
+  \ifnum\ReportPart=#1\relax\showparttrue\fi
+}
+% Full-source appendices (6..11): NOT part of the complete report. The report
+% explains the functions, logic, and structures; it does not reprint every
+% source file. Build one with its own part_XX.tex when the raw listing is needed.
+\newcommand{\SelectAppendix}[1]{%
+  \showpartfalse
   \ifnum\ReportPart=#1\relax\showparttrue\fi
 }
 \begin{document}
@@ -16,7 +24,9 @@
 \pagenumbering{roman}
 \hypersetup{pageanchor=true}
 \ifnum\ReportPart=0\relax
-  \noindent\textbf{Complete report.} All chapters and source appendices are included.
+  \noindent\textbf{Complete report.} All explanatory chapters are included. This
+  report explains the functions, logic, and structures; the full source listings
+  are kept as separate appendix builds (\texttt{part\_06}--\texttt{part\_11}).
 \else
   \noindent\textbf{Selected part: \ReportPart.} This PDF contains only the selected part.
   Choose a \texttt{part\_XX.tex} main document or change \texttt{\textbackslash{}ReportPart}
@@ -51,32 +61,32 @@
   \input{parts/05_terminal_gui.tex}
 \fi
 
-\SelectPart{6}
+\SelectAppendix{6}
 \ifshowpart
   \input{parts/06_source_aes.tex}
 \fi
 
-\SelectPart{7}
+\SelectAppendix{7}
 \ifshowpart
   \input{parts/07_source_sm4.tex}
 \fi
 
-\SelectPart{8}
+\SelectAppendix{8}
 \ifshowpart
   \input{parts/08_source_piret.tex}
 \fi
 
-\SelectPart{9}
+\SelectAppendix{9}
 \ifshowpart
   \input{parts/09_source_giraud.tex}
 \fi
 
-\SelectPart{10}
+\SelectAppendix{10}
 \ifshowpart
   \input{parts/10_source_run.tex}
 \fi
 
-\SelectPart{11}
+\SelectAppendix{11}
 \ifshowpart
   \input{parts/11_source_gui.tex}
 \fi

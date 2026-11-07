@@ -1,0 +1,29 @@
+{
+  "name": "pfe-overleaf-auto-sync",
+  "displayName": "PFE Overleaf Auto Sync",
+  "description": "Mirror external edits in the PFE LaTeX folder through Overleaf Workshop.",
+  "version": "1.0.3",
+  "publisher": "pfe-local",
+  "engines": { "vscode": "^1.85.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "extensionDependencies": ["iamhyc.overleaf-workshop"],
+  "capabilities": { "virtualWorkspaces": true, "untrustedWorkspaces": { "supported": false } },
+  "contributes": {
+    "commands": [
+      { "command": "pfeOverleaf.start", "title": "PFE Overleaf: Connect and Start Automatic Sync" },
+      { "command": "pfeOverleaf.stop", "title": "PFE Overleaf: Stop Automatic Sync" },
+      { "command": "pfeOverleaf.upload", "title": "PFE Overleaf: Sync All Files Now" }
+    ],
+    "configuration": {
+      "title": "PFE Overleaf Sync",
+      "properties": {
+        "pfeOverleaf.localFolder": {
+          "type": "string",
+          "default": "C:\\Projetos\\PFE 5A\\docs\\latex",
+          "description": "Local source of truth for the one-way Overleaf sync."
+        }
+      }
+    }
+  }
+}
