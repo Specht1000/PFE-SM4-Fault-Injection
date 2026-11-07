@@ -187,8 +187,7 @@ and GUI workflows. GUI integration checks use a hidden Tk window.
 
 Full SM4 recovery tests use random keys and a precomputed ciphertext-only oracle.
 They block access to `sm4.key_expansion` while the solver runs, verifying that
-recovery succeeds without reading a reference schedule. The MATLAB campaign
-retains its explicitly labeled single-round rk31 target for statistical analysis.
+recovery succeeds without reading a reference schedule.
 
 The default public vectors include:
 
@@ -198,29 +197,6 @@ The default public vectors include:
 | SM4 | `0123456789ABCDEFFEDCBA9876543210` | `0123456789ABCDEFFEDCBA9876543210` | `681EDF34D206965E86B3E94F536E4246` |
 
 ## Reading
-
-### MATLAB analysis
-
-```powershell
-matlab -batch "addpath('matlab'); analyze_dfa('Visible',false);"
-```
-
-```matlab
-addpath('matlab'); analyze_dfa
-```
-
-The analysis generates a reproducible 32-trial dataset, checks raw XOR and Hamming
-distances in MATLAB, and prepares fault-propagation plots, affected-byte heatmaps
-and candidate-convergence curves. Figures are saved as PNG, PDF and MATLAB FIG
-files in `matlab/results`, together with statistics, a MAT workspace and a text
-interpretation. MATLAB needs an active license; no extra toolboxes are required.
-The Python exporter requires only the standard library.
-
-These are software simulations with fixed configured keys and varied plaintexts,
-fault masks and locations. Dispersion is reported as one standard deviation.
-AES candidate counts describe 32-bit K10 quartets; SM4 counts describe 8-bit rk31
-bytes. The analysis preserves this distinction and does not rank the ciphers'
-security or infer physical glitch behavior.
 
 ### Project references
 

@@ -170,7 +170,7 @@ def sm4_fault_encrypt(plaintext, key, byte=None, mask=0, fault_round=31):
 
 
 def trace_round8(plaintext, key, row=0, column=0, mask=0, fault_round=8):
-    """Backward-compatible name used by terminal, GUI and MATLAB export tools.
+    """Backward-compatible name used by terminal and GUI tools.
 
     Despite its historical name, fault_round explicitly supports both 8 and 9.
     New simulation code should read encrypt_with_trace for the complete engine.
