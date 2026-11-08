@@ -26,6 +26,8 @@ def sm4_fault_encrypt(plaintext, key, byte=None, mask=0, fault_round=31):
     fields = {"Sbox input": "a", "Sbox output": "b", "Linear output": "linear", "New word": "new"}
 
     def observer(number, operation, value):
+        # Byte 0 is the most significant byte: move its mask to bits 31..24.
+        # Returning this replacement changes the real cipher at this exact event.
         if number == fault_round and operation == "Sbox input" and byte is not None:
             value ^= mask << (24 - 8 * byte)
         if operation in fields:
@@ -40,19 +42,26 @@ def sm4_fault_encrypt(plaintext, key, byte=None, mask=0, fault_round=31):
 @lru_cache(maxsize=1)
 def inverse_rows():
     """Invert SM4 L's 32x32 binary matrix with Gaussian elimination."""
+    # L(2^i) gives column i of L's binary matrix: each input bit is a basis vector.
     columns = [sm4.linear(1 << i) for i in range(32)]
+    # Store each augmented row [L | I] in one 64-bit integer; upper bits hold I.
     rows = [sum(((columns[col] >> row) & 1) << col for col in range(32)) | (1 << (32 + row)) for row in range(32)]
     for column in range(32):
+        # Find a row with a 1 in this column, then move it to the pivot position.
         pivot = next(row for row in range(column, 32) if (rows[row] >> column) & 1)
         rows[column], rows[pivot] = rows[pivot], rows[column]
         for row in range(32):
             if row != column and (rows[row] >> column) & 1:
+                # XOR eliminates the column bit; GF(2) requires no division.
                 rows[row] ^= rows[column]
+    # The lower half is now I; the upper half contains the rows of inverse L.
     return tuple(row >> 32 for row in rows)
 
 
 
 def inverse_linear(value):
+    # AND selects input bits used by each inverse-matrix row. Their parity is
+    # the GF(2) dot product; shift that one-bit result into its output position.
     return sum((bin(row & value).count("1") & 1) << index for index, row in enumerate(inverse_rows()))
 
 
@@ -62,14 +71,19 @@ def sm4_byte_candidates(correct, faulty, byte, mask):
     if len(correct) != 16 or len(faulty) != 16 or not 0 <= byte < 4 or not 1 <= mask <= 255:
         raise ValueError("Invalid SM4 output or known-fault descriptor.")
     c, f = struct.unpack(">4I", correct), struct.unpack(">4I", faulty)
+    # The restored last-round model allows only its newest output word to change.
     if c[1:] != f[1:]:
         raise ValueError("The last-round model requires three output words unchanged.")
+    # Cancel the unchanged older word and undo diffusion to isolate S-box differences.
     delta_b = inverse_linear(c[0] ^ f[0])
     shift = 24 - 8 * byte
     if not delta_b or delta_b & ~(255 << shift):
+        # Reject both a missing fault and differences outside the selected byte.
         raise ValueError("Difference does not match a single-byte S-box input fault.")
     d = (delta_b >> shift) & 255
+    # These three output words are public; their selected XOR byte is q.
     known = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+    # Enumerate unknown S-box inputs a, then convert each to a key guess a XOR q.
     inputs = {a for a in range(256) if sm4.SBOX[a] ^ sm4.SBOX[a ^ mask] == d}
     return {a ^ known for a in inputs}, inputs, delta_b
 
@@ -79,12 +93,16 @@ def reverse_sm4(final_keys, observer=None):
     """Four consecutive keys rk28..rk31 are REQUIRED, not merely rk31."""
     if len(final_keys) != 4:
         raise ValueError("SM4 reversal requires four consecutive final subkeys.")
+    # rk28..rk31 occupy K32..K35, supplying the four-word seed for inversion.
     words = [None] * 32 + list(final_keys)
     for index in range(31, -1, -1):
+        # Descending order ensures all words on the right are already known.
+        # CK is public; use the key-schedule transform L', not encryption's L.
         value = words[index+1] ^ words[index+2] ^ words[index+3] ^ sm4.CK[index]
         words[index] = words[index+4] ^ sm4.linear_key(sm4.sbox(value))
         if observer:
             observer(index, words[index])
+    # K0..K3 still include FK whitening; remove it and serialize the master key.
     return struct.pack(">4I", *(words[i] ^ sm4.FK[i] for i in range(4)))
 
 
@@ -99,12 +117,16 @@ def peel_sm4(ciphertext, target_round, recovered_keys):
     aes.validate_block(ciphertext, "SM4 ciphertext")
     if not 28 <= target_round <= 31:
         raise ValueError("Full SM4 recovery targets rounds 28..31.")
+    # Ciphertext reverses the final four words; restore chronological state order.
     words = list(struct.unpack(">4I", ciphertext))[::-1]
     for number in range(31, target_round, -1):
         if number not in recovered_keys:
             raise ValueError(f"Cannot undo round {number} before recovering its subkey.")
+        # Recompute the round transform with an already recovered key; XOR the
+        # newest word to recover the word that was dropped from the window.
         previous = words[3] ^ sm4.linear(sm4.sbox(words[0] ^ words[1] ^ words[2] ^ recovered_keys[number]))
         words = [previous, words[0], words[1], words[2]]
+    # Return ciphertext-style order so the same last-round filter can be reused.
     return struct.pack(">4I", *words[::-1])
 
 
@@ -123,14 +145,18 @@ def recover_sm4_master_key(correct, fault_oracle, masks=(1, 2, 3, 4, 5, 6, 7, 8)
         raise ValueError("Use distinct nonzero byte masks and start_byte 0..3.")
     keys, history, counts, used = {}, [], {}, 0
     for number in range(31, 27, -1):
+        # Recover later keys first; only those keys may be used for round peeling.
         clean_view = peel_sm4(correct, number, keys)
         subkey = bytearray(4)
         for byte in [(start_byte + offset) % 4 for offset in range(4)]:
             survivors = None
+            # None means no observation yet, not an empty or failed candidate set.
             for observation, mask in enumerate(masks, 1):
                 faulty = bytes(fault_oracle(number, byte, mask))
+                # The oracle knows the target secret, but returns only ciphertext.
                 faulty_view = peel_sm4(faulty, number, keys)
                 if candidate_filter is None:
+                    # Default DFA knows the mask; Giraud supplies a different filter.
                     fresh, inputs, delta = sm4_byte_candidates(clean_view, faulty_view, byte, mask)
                 else:
                     position, fresh, inputs, delta = candidate_filter(clean_view, faulty_view, mask)
@@ -138,6 +164,7 @@ def recover_sm4_master_key(correct, fault_oracle, masks=(1, 2, 3, 4, 5, 6, 7, 8)
                         raise ValueError("Fault observation does not match the requested byte.")
                 before = 256 if survivors is None else len(survivors)
                 survivors = set(fresh) if survivors is None else survivors & fresh
+                # Independent observations can remove candidates, never add them.
                 if not survivors:
                     raise ValueError("SM4 candidate intersection is empty; fault model is incompatible.")
                 used += 1
@@ -145,13 +172,18 @@ def recover_sm4_master_key(correct, fault_oracle, masks=(1, 2, 3, 4, 5, 6, 7, 8)
                 event = dict(round=number, byte=byte, observation=observation, mask=mask, before=before, pair_candidates=len(fresh), remaining=len(survivors), survivors=sorted(survivors), inputs=sorted(inputs), delta_b=delta, correct=correct.hex(), faulty=faulty.hex(), clean_view=clean_view.hex(), faulty_view=faulty_view.hex(), peeled_with={str(i): f"{value:08X}" for i, value in keys.items()})
                 history.append(event)
                 if observer is not None:
+                    # Copy event metadata so presentation code cannot edit solver state.
                     observer(dict(event))
                 if len(survivors) == 1:
+                    # Only uniqueness permits using this byte in a recovered round key.
                     subkey[byte] = next(iter(survivors))
                     break
             else:
+                # The loop exhausted its budget without a unique byte; do not peel
+                # an earlier round with a guessed key or claim a complete master key.
                 return dict(master_key=None, round_keys=keys, history=history, candidate_counts=counts, used=used, complete=False, blocked_round=number)
         keys[number] = int.from_bytes(subkey, "big")
+    # All four tail keys now come from observations; invert the schedule once.
     master = reverse_sm4([keys[number] for number in range(28, 32)])
     return dict(master_key=master, round_keys=keys, history=history, candidate_counts=counts, used=used, complete=True)
 

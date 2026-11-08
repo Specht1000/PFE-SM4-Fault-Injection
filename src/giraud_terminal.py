@@ -16,6 +16,7 @@ def main(selected_algorithm, argv=None):
     import piret_aes
     import run as target
 
+    # Parse options for the selected algorithm; the two executable scripts share this presentation.
     parser = argparse.ArgumentParser(description="Giraud AES attack and SM4 single-bit adaptation.")
     parser.add_argument("--algorithm", choices=(selected_algorithm,), default=selected_algorithm)
     parser.add_argument("--known-bit", action="store_true", help="Share the exact bit mask with the solver.")
@@ -24,6 +25,7 @@ def main(selected_algorithm, argv=None):
     parser.add_argument("--color", choices=("auto", "always", "never"), default="auto")
     args = parser.parse_args(argv)
     try:
+        # Validate the observation budget and select distinct single-bit masks.
         masks = masks_for(1, args.observations)
         for module in ((aes,) if selected_algorithm == "aes" else (sm4,)):
             target.block(module.KEY)
@@ -33,6 +35,7 @@ def main(selected_algorithm, argv=None):
     terminal = target.LessonTerminal(args.color, args.step)
     success = True
 
+    # Only the module selected by the entry point is executed.
     for algorithm, module in (("aes", aes), ("sm4", sm4)):
         if args.algorithm not in ("all", algorithm):
             continue
@@ -52,10 +55,12 @@ def main(selected_algorithm, argv=None):
         print("Bit known to solver: " + str(args.known_bit))
         print("AES: require HW(InvSbox[C XOR k] XOR InvSbox[F XOR k]) = 1." if is_aes else "SM4: invert L, then test S(a) XOR S(a XOR e) for one-bit errors.")
 
+        # SM4 needs inverse diffusion and four target rounds before schedule inversion.
         if not is_aes:
             recovered_bytes = {}
             _, clean_target_trace = sm4_fault_encrypt(plaintext, key)
 
+            # The target adapter knows the key, but returns only the faulty ciphertext to the solver.
             def oracle(number, byte, mask):
                 faulty, fault_trace = sm4_fault_encrypt(plaintext, key, byte, mask, number)
                 target.attack_steps.emit(terminal, target.attack_steps.sm4_fault_trace(clean_target_trace, fault_trace, number, byte, mask))
@@ -84,6 +89,7 @@ def main(selected_algorithm, argv=None):
             print(terminal.paint(f"Verification: PASS / {result['used']} faulty outputs / no reference subkeys", "32"))
             continue
 
+        # AES recovers each of the sixteen final-round key bytes independently.
         for byte in range(size):
             survivors = None
             for observation, mask in enumerate(masks, 1):
@@ -92,6 +98,7 @@ def main(selected_algorithm, argv=None):
                 used += 1
                 before = 256 if survivors is None else len(survivors)
                 target.attack_steps.emit(terminal, target.attack_steps.aes_giraud(correct, faulty, position, survivors, mask if args.known_bit else None))
+                # Intersect the new pair constraints; never replace the history with just the latest pair.
                 survivors = intersect_candidates(survivors, fresh)
                 print(f"\nKey byte {position}, observation {observation}, simulator mask {mask:02X}")
                 print(f"Fault before final SubBytes: input byte {byte}, row {byte%4}, column {byte//4} -> ciphertext/K10 byte {position} after ShiftRows.")
@@ -112,6 +119,7 @@ def main(selected_algorithm, argv=None):
                 print(f"Candidate count: {before} -> {len(survivors)}")
                 print("Survivors: " + " ".join(f"{value:02X}" for value in sorted(survivors)))
                 terminal.pause()
+                # Record only a unique byte, then stop querying faults for that byte.
                 if len(survivors) == 1:
                     recovered[position] = next(iter(survivors))
                     print(terminal.paint(f"RECOVERED K10 byte {position} = {recovered[position]:02X} / UNIQUE", "32"))
@@ -119,6 +127,7 @@ def main(selected_algorithm, argv=None):
             else:
                 unique = False
                 print("Ambiguous byte. Increase --observations; no value is selected.")
+        # Do not reverse an incomplete or ambiguous final-round key.
         if not unique:
             success = False
             print("Recovery incomplete: a unique key is not claimed.")

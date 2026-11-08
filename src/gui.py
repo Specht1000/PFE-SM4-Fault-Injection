@@ -23,6 +23,7 @@ INV_SBOX = [aes.SBOX.index(i) for i in range(256)]
 
 
 def parse_block(value):
+    # Convert user-entered hexadecimal into raw bytes before validating block length.
     data = bytes.fromhex(value)
     if len(data) != 16:
         raise ValueError("Enter exactly 16 bytes (32 hexadecimal digits).")
@@ -35,7 +36,9 @@ def snapshot(number, title, explanation, state, detail="", reference=None):
 
 def aes_trace(block, key, decrypt=False, fault=None):
     """Display the actual cipher execution; fault injection stays in piret_aes.py."""
+    # Store independent timeline records; GUI navigation must not re-run the cipher.
     steps = [snapshot(10 if decrypt else 0, "Input", "AES byte index = 4*column + row.", block)]
+    # Round keys are used for the teacher view, never supplied to the candidate solver.
     keys = aes.key_expansion(key)
     descriptions = {"SubBytes": "Replace each byte through the nonlinear S-box.", "ShiftRows": "Rotate row r left by r positions.", "MixColumns": "Mix each column in GF(2^8).", "AddRoundKey": "XOR the state with the current round key.", "InvSubBytes": "Undo the nonlinear substitution.", "InvShiftRows": "Rotate rows right to undo ShiftRows.", "InvMixColumns": "Multiply columns by the inverse mixing matrix."}
     if fault:
@@ -51,6 +54,7 @@ def aes_trace(block, key, decrypt=False, fault=None):
         return ciphertext, steps
 
     def observer(number, operation, state):
+        # Take snapshots after the real transformation, rather than duplicating cipher equations.
         if operation.startswith("After "):
             title = operation[6:]
             detail = "Round key: " + aes.state_to_bytes(keys[number]).hex() if title == "AddRoundKey" else ""
@@ -68,6 +72,7 @@ def sm4_trace(block, key, decrypt=False):
 
     def observer(index, operation, value):
         nonlocal current
+        # Track the current rolling window while scalar SM4 intermediate values are displayed separately.
         if operation == "State input":
             current = struct.pack(">4I", *value)
         elif operation == "Sbox input":
@@ -129,6 +134,7 @@ def piret_lesson(block, key, row, column, mask, maximum):
     masks = [mask] + random.Random(42).sample([v for v in range(1, 256) if v != mask], maximum - 1)
     outputs = [first_ct] + [aes_trace(block, key, fault=(8, row, column, value))[0] for value in masks[1:]]
     last_key, history, used = recover_key(clean_ct, outputs)
+    # Maintain separate intersection histories for the four AES key quartets.
     previous_groups = {}
     for index, group, count, remaining in history:
         pair = outputs[index-1]
@@ -158,6 +164,7 @@ def pdf_aes_lesson(block, key, row, column, mask, maximum):
     masks = [mask] + [value for value in range(1, 256) if value != mask][:maximum-1]
     last_key, history, used = bytearray(16), [], 0
     first_faulty = None
+    # Start with the chosen column but process all four groups to recover the full AES key.
     for group in [(column + offset) % 4 for offset in range(4)]:
         survivors = None
         for observation, value in enumerate(masks, 1):
@@ -168,6 +175,7 @@ def pdf_aes_lesson(block, key, row, column, mask, maximum):
                 if step["round"] >= 9:
                     reference = lookup[(9, "ShiftRows")] if step["title"] == "Injected XOR" else lookup[(step["round"], step["title"])]
                     steps.append(dict(step, title=f"Column {group} / {step['title']}", reference=reference["state"]))
+            # Add exhaustive numerical tables before the concise candidate-count summary.
             steps.extend(attack_steps.aes_piret(correct, faulty, group, survivors))
             fresh = console.piret_aes.key_candidates(correct, faulty, group)
             before = None if survivors is None else len(survivors)
@@ -206,8 +214,10 @@ def sm4_master_lesson(block, key, start_byte, mask, maximum, giraud_mode=False, 
         steps.extend(attack_steps.sm4_fault_trace(target_trace, fault_trace, number, byte, value))
         return faulty
 
+    # Keep SM4 candidate intersections indexed by both round and byte.
     candidate_history = {}
 
+    # Translate solver observations into visual steps without modifying the solver state.
     def show(event):
         identity = (event["round"], event["byte"])
         steps.extend(attack_steps.sm4_observation(event, candidate_history.get(identity), known_bit if giraud_mode else None))
@@ -230,6 +240,7 @@ def sm4_master_lesson(block, key, start_byte, mask, maximum, giraud_mode=False, 
             raise RuntimeError('Displayed SM4 schedule disagrees with recovery.')
         steps.extend(schedule_steps)
         steps.extend(attack_steps.verification("sm4", block, recovered, correct))
+    # Compare with simulation ground truth only after output-based recovery has completed.
     if complete and (recovered != key or sm4.sm4_encrypt_block(block, recovered) != correct):
         raise RuntimeError("SM4 full master-key verification failed.")
     keys = {str(r): f"{value:08X}" for r, value in result['round_keys'].items()}
@@ -279,6 +290,7 @@ def giraud_lesson(algorithm, plaintext, key, row=0, column=0, mask=1, maximum=8,
         for observation, actual_mask in enumerate(masks, 1):
             faulty, fault_trace = aes_giraud_encrypt(plaintext, key, target, actual_mask)
             position, fresh = giraud_aes.aes_candidates(correct, faulty, actual_mask if known_bit else None)
+            # Map the pre-SubBytes input location through final ShiftRows to the output key byte.
             input_column, input_row = divmod(target, 4)
             expected = 4 * ((input_column - input_row) % 4) + input_row
             if position != expected:
@@ -321,6 +333,7 @@ def log_report(report):
     terminal.section(f"GUI: {report['algorithm']} / {report['operation']}")
     print(f"Input: {report['input']}\nKey: {report['key']}")
     previous = report['input']
+    # Log every computed timeline step, even if the user never selects it in the GUI.
     for index, event in enumerate(report['steps'], 1):
         print(f"GUI step {index}/{len(report['steps'])}; round {event['round']}")
         print(event['explanation'])
@@ -336,6 +349,7 @@ def log_report(report):
 class CryptoLab:
     def __init__(self, root):
         self.root, self.report, self.index, self.timer, self.busy = root, None, 0, None, False
+        # Worker results cross this queue; only the Tk main thread may update widgets.
         self.messages = queue.Queue()
         root.title("Crypto Lab | AES · SM4 · Piret DFA")
         root.geometry("1280x900")
@@ -355,7 +369,9 @@ class CryptoLab:
         style.configure("TNotebook.Tab", background=CELL, foreground=TEXT, padding=(18, 10))
         style.map("TNotebook.Tab", background=[("selected", PANEL)], foreground=[("selected", ACCENT)])
         self.build()
+        # Reconfigure controls when a selector changes; this does not recompute an existing lesson.
         self.algorithm.trace_add("write", self.selection_changed)
+        # Keep input hints and fault options consistent with the selected operation.
         self.operation.trace_add("write", self.selection_changed)
         root.bind("<Left>", lambda event: self.move(-1) if not isinstance(root.focus_get(), (tk.Entry, ttk.Combobox)) else None)
         root.bind("<Right>", lambda event: self.move(1) if not isinstance(root.focus_get(), (tk.Entry, ttk.Combobox)) else None)
@@ -370,6 +386,7 @@ class CryptoLab:
         return tk.Button(parent, text=title, command=action, bg=ACCENT if primary else CELL, fg=BG if primary else TEXT, relief="flat", padx=12, pady=8, font=("Segoe UI", 10), cursor="hand2")
 
     def build(self):
+        # Build the header separately from the parameter sidebar and the lesson panels.
         header = tk.Frame(self.root, bg=BG, padx=22, pady=16)
         header.pack(fill="x")
         self.label(header, "CRYPTO LAB", 24, ACCENT).pack(side="left")
@@ -379,6 +396,7 @@ class CryptoLab:
         sidebar = tk.Frame(body, bg=PANEL, padx=16, pady=16, width=295)
         sidebar.pack(side="left", fill="y", padx=(0, 16))
         sidebar.pack_propagate(False)
+        # Collect editable widgets so computation can disable them as a group.
         self.controls = []
         for title, variable, values in [("Algorithm", self.algorithm, ("AES-128", "SM4")), ("Lesson", self.operation, ("Encrypt", "Decrypt", "Fault analysis", "Giraud attack"))]:
             self.label(sidebar, title, color=MUTED).pack(anchor="w", pady=(0, 5))
@@ -422,6 +440,7 @@ class CryptoLab:
         self.label(sidebar, "Offline simulation · no board needed", 9, MUTED).pack(anchor="w", pady=10)
         right = tk.Frame(body, bg=BG)
         right.pack(side="left", fill="both", expand=True)
+        # Separate step exploration from the final result and reading guide.
         self.tabs = ttk.Notebook(right)
         self.tabs.pack(fill="both", expand=True)
         explorer, summary_tab = [tk.Frame(self.tabs, bg=PANEL, padx=16, pady=14) for _ in range(2)]
@@ -456,6 +475,7 @@ class CryptoLab:
             self.cells.append(cells)
         self.layout_label = self.label(explorer, "", 10, MUTED)
         self.layout_label.pack(anchor="w", pady=6)
+        # Keep long candidate tables scrollable instead of truncating the numerical explanation.
         details_panel = tk.Frame(explorer, bg=BG)
         details_panel.pack(fill="both", expand=True, pady=8)
         self.details = tk.Text(details_panel, height=8, bg=BG, fg=TEXT, relief="flat", font=("Consolas", 10), wrap="word", padx=10, pady=10)
@@ -475,6 +495,7 @@ class CryptoLab:
         self.progress.pack(side="right")
         seek = tk.Frame(explorer, bg=PANEL)
         seek.pack(fill="x")
+        # The slider selects an existing timeline index; it never injects another fault.
         self.seek = tk.Scale(seek, from_=0, to=1, orient="horizontal", command=self.seek_to, bg=PANEL, fg=TEXT, highlightthickness=0, showvalue=False)
         self.seek.pack(side="left", fill="x", expand=True)
         ttk.Combobox(seek, textvariable=self.speed, values=(300, 600, 1000, 1800), width=6, state="readonly").pack(side="right")
@@ -491,6 +512,7 @@ class CryptoLab:
         self.navigation()
 
     def selection_changed(self, *_):
+        # Ignore new requests while a worker is computing, preventing overlapping lessons.
         if self.busy:
             return
         is_giraud = self.operation.get() == "Giraud attack"
@@ -509,6 +531,7 @@ class CryptoLab:
             self.status.set("Settings changed · Build lesson to apply. Timeline retains its original inputs.")
 
     def load_example(self):
+        # Ignore new requests while a worker is computing, preventing overlapping lessons.
         if self.busy:
             return
         is_sm4 = self.algorithm.get() == "SM4"
@@ -517,17 +540,21 @@ class CryptoLab:
         self.status.set("Standard vector loaded · press Build lesson")
 
     def set_text(self, widget, text):
+        # Temporarily unlock the read-only text area to replace its contents.
         widget.configure(state="normal")
+        # Replace the previous explanation instead of accumulating unrelated steps.
         widget.delete("1.0", "end")
         widget.insert("1.0", text)
         widget.configure(state="disabled")
 
     def run(self):
+        # Ignore new requests while a worker is computing, preventing overlapping lessons.
         if self.busy:
             return
         self.stop()
         try:
             key, block = parse_block(self.key.get()), parse_block(self.value.get())
+            # Fault coordinates and masks are required only for attack lessons.
             attack = self.operation.get() in ("Fault analysis", "Giraud attack")
             row, column, mask, maximum = 0, 0, 1, 6
             if attack:
@@ -540,6 +567,7 @@ class CryptoLab:
             messagebox.showerror("Invalid input", str(error), parent=self.root)
             return
         algorithm, operation = self.algorithm.get(), self.operation.get()
+        # Disable edits until the queued result is delivered to the Tk main thread.
         self.busy = True
         self.navigation()
         for widget in self.controls:
@@ -547,10 +575,12 @@ class CryptoLab:
         self.run_button.configure(state="disabled", text="Computing…")
         self.example_button.configure(state="disabled")
         self.status.set("Building the lesson and checking its result…")
+        # Run expensive candidate filtering off the Tk event loop so the interface stays responsive.
         threading.Thread(target=self.compute, args=(algorithm, operation, key, block, row, column, mask, maximum, self.known_bit.get()), daemon=True).start()
 
     def compute(self, algorithm, operation, key, block, row, column, mask, maximum, known_bit=False):
         try:
+            # Choose a lesson builder; the GUI presents attack logic rather than reimplementing it.
             if operation == "Giraud attack":
                 report = giraud_lesson(algorithm, block, key, row, column, mask, maximum, known_bit)
             elif operation == "Fault analysis":
@@ -563,7 +593,9 @@ class CryptoLab:
                 if recovered != block:
                     raise RuntimeError("Inverse verification failed.")
                 report = dict(steps=steps, output=output.hex(), recovered=recovered.hex(), verified=True)
+            # Attach the exact inputs used by this computation, independent of later widget changes.
             report.update(algorithm=algorithm, operation=operation, key=key.hex(), input=block.hex())
+            # Mirror the complete lesson to the terminal and session log before notifying the GUI.
             log_report(report)
             self.messages.put((report, None))
         except Exception as error:
@@ -572,7 +604,9 @@ class CryptoLab:
 
     def poll(self):
         try:
+            # Poll without blocking Tk; a missing result simply means the worker is still running.
             report, error = self.messages.get_nowait()
+        # Keep polling on the scheduled timer without freezing the interface.
         except queue.Empty:
             pass
         else:
@@ -587,6 +621,7 @@ class CryptoLab:
                 messagebox.showerror("Lesson error", error, parent=self.root)
             else:
                 self.report, self.index = report, 0
+                # Rebuild navigation bounds from the completed lesson, not the previous one.
                 self.seek.configure(to=len(report["steps"]) - 1)
                 self.step_list.configure(values=[f"{i+1}. R{s['round']:02d} · {s['title']}" for i, s in enumerate(report["steps"])])
                 self.render()
@@ -602,8 +637,10 @@ class CryptoLab:
             return
         step = self.report["steps"][self.index]
         previous = self.report["steps"][self.index - 1]["state"] if self.index else step["state"]
+        # Fault lessons compare against the clean execution; ordinary traces compare against the previous step.
         reference = step["reference"] or previous
         state, comparison = bytes.fromhex(step["state"]), bytes.fromhex(reference)
+        # Compute byte differences once for both red highlighting and changed-bit statistics.
         delta = bytes(a ^ b for a, b in zip(state, comparison))
         sm4_layout = self.report["algorithm"] == "SM4"
         self.title.configure(text=f"Round {step['round']:02d} · {step['title']}")
@@ -615,6 +652,7 @@ class CryptoLab:
             for row in range(4):
                 for column in range(4):
                     position = 4 * row + column if sm4_layout else 4 * column + row
+                    # Mark only nonzero byte differences in red; the reference panel stays neutral.
                     changed = bool(delta[position]) and panel != 1
                     self.cells[panel][row][column].configure(text=f"{data[position]:02X}", bg="#482121" if changed else CELL, fg=RED if changed else TEXT)
         self.set_text(self.details, step["detail"] or "Follow the highlighted bytes. The middle panel provides the comparison state; XOR shows which bits differ.")
@@ -624,6 +662,7 @@ class CryptoLab:
         self.navigation()
 
     def navigation(self):
+        # Navigation is valid only after a report exists and no replacement is being computed.
         ready = bool(self.report) and not self.busy
         self.previous.configure(state="normal" if ready and self.index > 0 else "disabled")
         self.next_button.configure(state="normal" if ready and self.index < len(self.report["steps"]) - 1 else "disabled")
@@ -644,6 +683,7 @@ class CryptoLab:
 
     def move(self, direction):
         if self.report:
+            # Clamp previous/next navigation to the first and last valid timeline indices.
             self.select(max(0, min(len(self.report["steps"]) - 1, self.index + direction)))
 
     def play(self):
@@ -656,6 +696,7 @@ class CryptoLab:
             self.index = 0
         self.play_button.configure(text="Ⅱ Pause")
         self.render()
+        # Schedule playback without sleep; Tk remains available for pause and navigation.
         self.timer = self.root.after(self.speed.get(), self.tick)
 
     def tick(self):
@@ -663,12 +704,14 @@ class CryptoLab:
         self.index += 1
         self.render()
         if self.index < len(self.report["steps"]) - 1:
+            # Schedule playback without sleep; Tk remains available for pause and navigation.
             self.timer = self.root.after(self.speed.get(), self.tick)
         else:
             self.stop()
 
     def stop(self):
         if self.timer is not None:
+            # Cancel the outstanding timer to prevent an extra step after pausing.
             self.root.after_cancel(self.timer)
             self.timer = None
         self.play_button.configure(text="▶ Play")
@@ -694,10 +737,12 @@ class CryptoLab:
     def export(self):
         if not self.report:
             return
+        # Ask for a JSON destination only when the user explicitly exports the computed report.
         filename = filedialog.asksaveasfilename(parent=self.root, title="Export lesson", defaultextension=".json", filetypes=[("JSON lesson", "*.json")], initialfile="crypto-lab-lesson.json")
         if filename:
             try:
                 with open(filename, "w", encoding="utf-8") as output:
+                    # Export the already computed lesson, including intermediate steps and recovery history.
                     json.dump(self.report, output, indent=2)
                 self.status.set("Lesson exported · " + filename)
             except OSError as error:
@@ -712,6 +757,7 @@ class CryptoLab:
 def main():
     """Keep one overwritten log per GUI session, including every built lesson."""
     window = tk.Tk()
+    # Route exceptions from Tk callbacks to stderr so the session log captures them.
     window.report_callback_exception = traceback.print_exception
     CryptoLab(window)
     window.mainloop()

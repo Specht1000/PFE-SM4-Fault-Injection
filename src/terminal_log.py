@@ -15,10 +15,12 @@ COLORS.update(dict(zip(range(90, 98), ("#8ea0b8", "#ff9191", "#a0efb0", "#ffe299
 def colored_html(text):
     """Translate ANSI foreground colors and bold into escaped HTML spans."""
     pieces, color, bold, position = [], None, False, 0
+    # Split visible text from ANSI control sequences; escape text before embedding it in HTML.
     for match in ANSI_COLOR.finditer(text):
         style = (f"color:{color};" if color else "") + ("font-weight:bold;" if bold else "")
         value = escape(text[position:match.start()])
         pieces.append(f'<span style="{style}">{value}</span>' if style else value)
+        # Interpret only style/color codes; other terminal control sequences are not rendered as text.
         if match.group().endswith("m"):
             codes = match.group()[2:-1] or "0"
             for code in map(int, codes.split(";")):
@@ -46,6 +48,7 @@ class Tee:
         self.output = output
 
     def write(self, text):
+        # Mirror each write to both destinations without removing ANSI color information.
         self.terminal.write(text)
         self.output.write(text)
         self.output.flush()
@@ -71,12 +74,15 @@ def terminal_log(name, folder=None):
             previous.unlink()
     path = directory / f"{name}.txt"
     path.with_suffix(".html").write_text(colored_html(""), encoding="utf-8")
+    # Opening in write mode replaces this program's previous run rather than appending.
     with path.open("w", encoding="utf-8") as output:
         try:
+            # Capture stderr too, including tracebacks, while preserving live terminal output.
             with redirect_stdout(Tee(sys.stdout, output)), redirect_stderr(Tee(sys.stderr, output)):
                 print(f"Log file: {path}")
                 print(f"Colored HTML log: {path.with_suffix('.html')}")
                 yield path
+        # Finalize the browser-readable HTML even after an exception or interruption.
         finally:
             output.flush()
             path.with_suffix(".html").write_text(colored_html(path.read_text(encoding="utf-8")), encoding="utf-8")
@@ -86,7 +92,9 @@ def run_with_log(main, name):
     """Save normal output, interrupted lessons and unexpected error details."""
     with terminal_log(name):
         try:
+            # Keep logging active throughout the executable's main function, including a GUI session.
             code = main()
+        # Treat Ctrl+C and a closed input stream as an interrupted lesson, with a recorded exit code.
         except (KeyboardInterrupt, EOFError):
             print("\nLesson stopped.")
             code = 130

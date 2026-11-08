@@ -70,6 +70,7 @@ CK = (
 
 def rotl(val: int, count: int) -> int:
     """Rotate a 32-bit unsigned word left; overflow wraps into the low bits."""
+    # Mask the shifted high bits to 32 bits, then wrap the overflow into low positions.
     return ((val << count) & WORD_MASK) | (val >> (32 - count))
 
 
@@ -79,17 +80,21 @@ def linear(b: int) -> int:
     L is XOR-linear: L(a XOR b) = L(a) XOR L(b). The SM4 DFA uses this
     property to invert an observed output difference before testing the S-box.
     """
+    # XOR rotations, not integer sums: this is why L is linear over GF(2).
     return b ^ rotl(b, 2) ^ rotl(b, 10) ^ rotl(b, 18) ^ rotl(b, 24)
 
 
 def linear_key(b: int) -> int:
     """Key-schedule diffusion L-prime: rotations 13 and 23, not data-map L."""
+    # The key schedule has different rotation amounts from encryption diffusion.
     return b ^ rotl(b, 13) ^ rotl(b, 23)
 
 
 def sbox(a: int) -> int:
     """Apply tau: substitute all four bytes, preserving big-endian word order."""
+    # Pack as four big-endian bytes so byte zero remains the most significant.
     input_bytes = struct.pack('>I', a)
+    # Each byte is substituted independently; tau does not mix neighboring bytes.
     substituted_bytes = bytes(SBOX[byte] for byte in input_bytes)
     return struct.unpack('>I', substituted_bytes)[0]
 
@@ -107,6 +112,7 @@ def observe(observer, number, operation, value):
     """
     if observer is None:
         return value
+    # Only the external observer can request a replacement; None preserves normal execution.
     replacement = observer(number, operation, value)
     return value if replacement is None else replacement
 
@@ -117,9 +123,11 @@ def round(x: list[int], rk: int, observer=None, round_index=0):
     A = X[i+1] XOR X[i+2] XOR X[i+3] XOR rk[i]
     X[i+4] = X[i] XOR L(tau(A))
     """
+    # Form the nonlinear input from the newest three words and the round key.
     sbox_input = observe(observer, round_index, "Sbox input", x[1] ^ x[2] ^ x[3] ^ rk)
     substituted = observe(observer, round_index, "Sbox output", sbox(sbox_input))
     diffused = observe(observer, round_index, "Linear output", linear(substituted))
+    # XOR with the oldest word, then drop that word when returning the next window.
     new_word = observe(observer, round_index, "New word", x[0] ^ diffused)
     return x[1], x[2], x[3], new_word
 
@@ -130,6 +138,7 @@ def generate_round_key(k: list[int], round: int) -> int:
     The parameter name round is retained for callers using keyword arguments.
     Encryption and expansion share tau, but expansion must use linear_key.
     """
+    # Use public CK for this schedule round; this is not an encryption round key input.
     return k[0] ^ linear_key(sbox(k[1] ^ k[2] ^ k[3] ^ CK[round]))
 
 
@@ -143,6 +152,7 @@ def key_expansion(key: bytes) -> list[int]:
     if len(key) != BLOCK_SIZE:
         raise ValueError("SM4 key must contain exactly 16 bytes.")
     master_words = struct.unpack(">4I", key)
+    # Whiten the master words with four fixed public FK constants before expansion.
     schedule_words = [master_words[i] ^ FK[i] for i in range(4)]
 
     for i in range(N_ROUNDS):
@@ -170,10 +180,12 @@ def sm4_process_block(block: bytes, key: bytes, encrypt: bool, observer=None) ->
     state = list(struct.unpack(">4I", block))
     round_keys = key_expansion(key)
     for i in range(N_ROUNDS):
+        # Decryption reuses the round function, changing only the round-key order.
         key_index = i if encrypt else N_ROUNDS - 1 - i
         state = list(observe(observer, i, "State input", tuple(state)))
         state = list(round(state, round_keys[key_index], observer, i))
         state = list(observe(observer, i, "State output", tuple(state)))
+    # Reverse word order at output; do not reverse bytes within each word.
     output = struct.pack(">4I", *state[::-1])
     return observe(observer, N_ROUNDS, "Ciphertext", output)
 

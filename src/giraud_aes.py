@@ -21,12 +21,16 @@ def aes_fault_encrypt(plaintext, key, byte=0, mask=None):
     trace = {}
 
     def observer(number, operation, state):
+        # Restrict the intervention to final SubBytes input, before nonlinear mixing.
         if number == 10 and operation == "Before SubBytes":
             trace["Before fault"] = aes.state_to_bytes(state)
             if mask is not None:
+                # Convert the serialized input index to AES's column-major matrix.
                 state[byte % 4][byte // 4] ^= mask
             trace["Injected bit"] = aes.state_to_bytes(state)
         if number == 10 and operation.startswith("After "):
+            # Serialize a copy at each stage so later in-place operations cannot
+            # overwrite earlier teaching snapshots.
             name = "Ciphertext" if operation == "After AddRoundKey" else operation[6:]
             trace[name] = aes.state_to_bytes(state)
 
@@ -52,12 +56,16 @@ def aes_candidates(correct, faulty, known_mask=None):
         raise ValueError("AES Giraud requires exactly one changed ciphertext byte.")
     position = changed[0]
     allowed = SINGLE_BITS if known_mask is None else (known_mask,)
+    # Unknown-bit filtering accepts any one-bit input difference; known-bit mode
+    # accepts only the exact mask and therefore assumes more attacker knowledge.
 
     candidates = set()
     for guess in range(256):
+        # Guess the final key byte, remove AddRoundKey, then undo SubBytes on both outputs.
         clean_input = AES_INVERSE_SBOX[correct[position] ^ guess]
         faulty_input = AES_INVERSE_SBOX[faulty[position] ^ guess]
         difference = clean_input ^ faulty_input
+        # A valid guess must reconstruct a difference permitted by the fault model.
         if difference in allowed:
             candidates.add(guess)
     return position, candidates
@@ -65,11 +73,13 @@ def aes_candidates(correct, faulty, known_mask=None):
 
 def recover_byte(observations):
     """Intersect observations for one AES key byte; require a consistent location."""
+    # Bind the shared intersection routine to AES equations only.
     return filter_observations(aes_candidates, observations)
 
 
 def main(argv=None):
     """Use the shared terminal lesson with the AES fault model."""
+    # Import presentation only when running the CLI; importing the solver stays quiet.
     from giraud_terminal import main as terminal_main
     return terminal_main("aes", argv)
 

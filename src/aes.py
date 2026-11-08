@@ -107,10 +107,12 @@ def validate_block(data, label="Block"):
 def bytes_to_state(data):
     """Map 16 bytes into a fresh 4x4 matrix using the AES column-major layout."""
     validate_block(data)
+    # Allocate independent rows so updating one row cannot change another.
     state = [[0] * 4 for _ in range(4)]
 
     for col in range(4):
         for row in range(4):
+            # Fill one column at a time, matching the AES specification and key layout.
             state[row][col] = data[4 * col + row]
 
     return state
@@ -118,6 +120,7 @@ def bytes_to_state(data):
 
 def state_to_bytes(state):
     """Serialize the matrix in the same column order used by bytes_to_state."""
+    # Reverse the exact input mapping; do not flatten row by row.
     return bytes(state[row][col] for col in range(4) for row in range(4))
 
 
@@ -128,12 +131,14 @@ def state_to_bytes(state):
 
 def xtime(a):
     """Multiply a byte by x (02) in GF(2^8), reducing by polynomial 0x11B."""
+    # Multiplication by x shifts polynomial coefficients toward the next bit.
     result = a << 1
 
     # If the x^8 term overflows, reduction contributes 0x1B to the low byte.
     if a & 0x80:
         result ^= 0x1B
 
+    # Keep only eight bits after reduction; Python integers do not overflow automatically.
     return result & 0xFF
 
 
@@ -142,6 +147,7 @@ def gf_mul(a, b):
     result = 0
 
     for _ in range(8):
+        # The lowest multiplier bit decides whether this partial product contributes.
         if b & 1:
             result ^= a
 
@@ -165,12 +171,14 @@ def sub_bytes(state):
     for row in range(4):
         for col in range(4):
             original = state[row][col]
+            # Use the original byte as a table index; substitution does not move positions.
             state[row][col] = SBOX[original]
 
 
 def shift_rows(state):
     """Rotate row r left by r bytes so the next MixColumns sees new groups."""
     for row in range(1, 4):
+        # Slicing removes the first r bytes and appends them, implementing a left rotation.
         state[row] = state[row][row:] + state[row][:row]
 
 
@@ -184,6 +192,7 @@ def mix_column(column):
     for coefficients in MIX_MATRIX:
         value = 0
         for coefficient, byte in zip(coefficients, column):
+            # Multiply in GF(2^8); accumulate the matrix dot product using XOR.
             value ^= gf_mul(coefficient, byte)
         result.append(value)
     return result
@@ -192,6 +201,7 @@ def mix_column(column):
 def mix_columns(state):
     """Mix each column in place; the normal algorithm never prints output."""
     for column in range(4):
+        # Read all four source bytes before writing any mixed output byte.
         mixed = mix_column([state[row][column] for row in range(4)])
         for row in range(4):
             state[row][column] = mixed[row]
@@ -205,6 +215,7 @@ def add_round_key(state, round_key):
     """
     for row in range(4):
         for col in range(4):
+            # XOR the matching key position; repeating this XOR removes the same key.
             state[row][col] ^= round_key[row][col]
 
 
@@ -234,6 +245,7 @@ def key_expansion(key):
     words = [list(key[4 * i:4 * i + 4]) for i in range(4)]
 
     for i in range(4, 4 * (N_ROUNDS + 1)):
+        # Copy the previous word because the schedule core may modify its first byte.
         temp = words[i - 1].copy()
 
         if i % 4 == 0:
@@ -241,6 +253,7 @@ def key_expansion(key):
             temp = sub_word(rot_word(temp))
             temp[0] ^= RCON[i // 4]
 
+        # Combine the transformed previous word with the word four positions back.
         new_word = [words[i - 4][j] ^ temp[j] for j in range(4)]
 
         words.append(new_word)
@@ -272,6 +285,7 @@ def _operation(state, number, name, transform, observer):
     """
     if observer is not None:
         observer(number, "Before " + name, state)
+    # Apply the normal transformation between the optional before/after callbacks.
     transform(state)
     if observer is not None:
         observer(number, "After " + name, state)
@@ -281,10 +295,12 @@ def aes_encrypt(plaintext, key, observer=None):
     """Encrypt one raw block. No printing, pauses or built-in fault injection."""
     state = bytes_to_state(plaintext)
     keys = key_expansion(key)
+    # Whiten the plaintext with K0 before the ten numbered rounds.
     _operation(state, 0, "AddRoundKey", lambda s: add_round_key(s, keys[0]), observer)
     for number in range(1, N_ROUNDS + 1):
         _operation(state, number, "SubBytes", sub_bytes, observer)
         _operation(state, number, "ShiftRows", shift_rows, observer)
+        # Round 10 omits MixColumns; this permits the final-round DFA byte equations.
         if number != N_ROUNDS:
             _operation(state, number, "MixColumns", mix_columns, observer)
         _operation(state, number, "AddRoundKey", lambda s: add_round_key(s, keys[number]), observer)
@@ -301,12 +317,14 @@ def inv_sub_bytes(state):
 def inv_shift_rows(state):
     """Undo row r by rotating it right by r positions."""
     for row in range(1, 4):
+        # Take the last r bytes to the front to undo the encryption rotation.
         state[row] = state[row][-row:] + state[row][:-row]
 
 
 def inv_mix_columns(state):
     """Multiply each column by the inverse diffusion matrix in GF(2^8)."""
     for column in range(4):
+        # Preserve the source column so all inverse-matrix rows use unchanged inputs.
         original = [state[row][column] for row in range(4)]
         for row in range(4):
             value = 0
@@ -319,11 +337,13 @@ def aes_decrypt(ciphertext, key, observer=None):
     """Decrypt one raw block by reversing operations and round-key order."""
     state = bytes_to_state(ciphertext)
     keys = key_expansion(key)
+    # Start by removing the last encryption key; XOR is its own inverse.
     _operation(state, N_ROUNDS, "AddRoundKey", lambda s: add_round_key(s, keys[N_ROUNDS]), observer)
     for number in range(N_ROUNDS - 1, -1, -1):
         _operation(state, number, "InvShiftRows", inv_shift_rows, observer)
         _operation(state, number, "InvSubBytes", inv_sub_bytes, observer)
         _operation(state, number, "AddRoundKey", lambda s: add_round_key(s, keys[number]), observer)
+        # At round zero there was no preceding MixColumns, so no inverse mixing is needed.
         if number:
             _operation(state, number, "InvMixColumns", inv_mix_columns, observer)
     return state_to_bytes(state)
@@ -333,6 +353,7 @@ def main():
     """Run normal AES encryption and decryption using the configured inputs."""
     key, plaintext = bytes.fromhex(KEY), bytes.fromhex(PLAINTEXT)
     ciphertext = aes_encrypt(plaintext, key)
+    # Check the forward result with the inverse algorithm, not another encryption.
     recovered = aes_decrypt(ciphertext, key)
     print("AES-128")
     print("Key:        " + key.hex().upper())

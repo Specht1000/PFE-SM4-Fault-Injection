@@ -61,11 +61,13 @@ MIX_MATRIX = aes.MIX_MATRIX
 
 def difference(a, b):
     """Return a fresh XOR-difference matrix; inputs are never modified."""
+    # XOR corresponding positions; equal bytes become zero in the difference matrix.
     return [[a[r][c] ^ b[r][c] for c in range(4)] for r in range(4)]
 
 
 def clone(state):
     """Copy each row so a stored snapshot does not alias the active state."""
+    # Copy every row as well as the outer list to prevent snapshot aliasing.
     return [row[:] for row in state]
 
 
@@ -131,6 +133,7 @@ def encrypt_with_trace(plaintext, key, row=0, column=0, mask=0, fault_round=8):
     trace = []
 
     def observer(number, operation, state):
+        # Inject only once at the selected round and operation, outside the AES implementation.
         if number == fault_round and operation == "Before MixColumns":
             state[row][column] ^= mask
             trace.append((number, "Fault point", aes.state_to_bytes(state)))
@@ -195,9 +198,12 @@ def key_candidates(correct, faulty, column):
     # Four small lookups avoid brute-force enumeration of all 2^32 quartets.
     tables = []
     for position in output_positions(column):
+        # Use 256 independent buckets, one for each possible inverse-S-box difference.
         table = [[] for _ in range(256)]
         for guess in range(256):
+            # Remove a guessed final-key byte from both outputs before undoing their S-boxes.
             delta = INV_SBOX[correct[position] ^ guess] ^ INV_SBOX[faulty[position] ^ guess]
+            # Record which byte guesses produce this difference; joint constraints are applied later.
             table[delta].append(guess)
         tables.append(table)
     found = set()
@@ -206,6 +212,7 @@ def key_candidates(correct, faulty, column):
             # A single shared row/error must satisfy ALL four equations.
             # Independent byte filtering alone would lose this constraint.
             choices = [tables[r][gf_multiply(MIX_MATRIX[r][unknown_row], unknown_error)] for r in range(4)]
+            # Enumerate compatible four-byte combinations for this shared error pattern; deduplicate tuples.
             found.update(product(*choices))
     return found
 
@@ -218,6 +225,7 @@ def recover_last_key(correct, faulty_outputs, observer=None):
     """
     if len(correct) != 16:
         raise ValueError("Correct ciphertext must contain 16 bytes.")
+    # Track each quartet separately; None means no observation has constrained that group yet.
     groups, used = [None] * 4, 0
     for used, faulty in enumerate(faulty_outputs, 1):
         if len(faulty) != 16 or any(a == b for a, b in zip(correct, faulty)):
@@ -231,6 +239,7 @@ def recover_last_key(correct, faulty_outputs, observer=None):
                 raise ValueError("Empty candidate intersection: incompatible ciphertexts or fault model.")
             if observer:
                 observer(used, column, before, len(fresh), tuple(sorted(groups[column])))
+        # All four quartets must be unique before claiming a complete final-round key.
         if all(len(group) == 1 for group in groups):
             # Group tuples are in pre-ShiftRows row order. Restore true K10 order.
             last_key = bytearray(16)
@@ -259,14 +268,17 @@ def reverse_key_schedule(last_key, observer=None):
     # K10 occupies the final four schedule words, w40 through w43.
     words[40:] = [list(last_key[index:index+4]) for index in range(0, 16, 4)]
     for index in range(43, 3, -1):
+        # Copy the known preceding word before applying the schedule core, if required.
         transformed = words[index - 1][:]
         if index % 4 == 0:
             # Same RotWord/SubWord/Rcon transformation as forward expansion.
             transformed = [SBOX[byte] for byte in transformed[1:] + transformed[:1]]
             transformed[0] ^= aes.RCON[index // 4]
+        # Rearrange the forward recurrence: XOR removes the transformed neighboring word.
         words[index - 4] = [a ^ b for a, b in zip(words[index], transformed)]
         if observer:
             observer(index, bytes(words[index]), bytes(transformed), bytes(words[index - 4]))
+    # Concatenate w0..w3 in their original order to reconstruct the AES master key.
     return bytes(sum(words[:4], []))
 
 
@@ -291,6 +303,7 @@ def show_difference(title, a, b):
 class Terminal:
     """ANSI styling is optional; redirected output stays readable by default."""
     def __init__(self, color="auto", step=False):
+        # Respect explicit color settings, terminal capability and the NO_COLOR environment flag.
         self.color = color == "always" or color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ
         self.step = step
         if self.color and os.name == "nt":
@@ -299,10 +312,12 @@ class Terminal:
             kernel = ctypes.windll.kernel32
             handle, mode = kernel.GetStdHandle(-11), ctypes.c_ulong()
             if not kernel.GetConsoleMode(handle, ctypes.byref(mode)) or not kernel.SetConsoleMode(handle, mode.value | 4):
+                # Respect explicit color settings, terminal capability and the NO_COLOR environment flag.
                 self.color = color == "always"
 
     def paint(self, text, code="36"):
         """Wrap one fragment in ANSI codes; reset immediately to avoid color bleed."""
+        # Reset ANSI styling after each fragment so red does not leak into neighboring values.
         return f"\033[{code}m{text}\033[0m" if self.color else str(text)
 
     def section(self, title):
@@ -312,6 +327,7 @@ class Terminal:
 
     def pause(self):
         """Automatic execution remains the default unless --step was requested."""
+        # Pause only in interactive step mode; ordinary execution and tests remain automatic.
         if self.step:
             input("\nPress Enter to continue...")
 
@@ -322,6 +338,7 @@ class Terminal:
         for row in range(4):
             clean_cells, faulty_cells, diff_cells = [], [], []
             for column in range(4):
+                # Render AES rows while reading bytes in their actual column-major order.
                 index = 4 * column + row
                 clean_cells.append(f"{correct[index]:02X}")
                 faulty_cells.append(self.paint(f"{faulty[index]:02X}", "31") if delta[index] else f"{faulty[index]:02X}")
@@ -459,6 +476,7 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--row", type=int, choices=range(4), default=FAULT_ROW)
     parser.add_argument("--column", type=int, choices=range(4), default=FAULT_COL)
+    # Convert command-line strings to validated settings before querying the simulated target.
     args = parser.parse_args(argv)
     try:
         # Only the target simulator reads aes.KEY; the solver receives ciphertexts.
@@ -481,6 +499,7 @@ def main(argv=None):
     print("Plaintext:          " + plaintext.hex().upper())
     print("Correct ciphertext: " + correct.hex().upper())
     terminal.pause()
+    # Use reproducible distinct nonzero errors; these simulator values are not solver inputs.
     masks = random.Random(args.seed).sample(range(1, 256), args.faults)
     first_faulty, first_trace = trace_round8(plaintext, target_key, args.row, args.column, masks[0])
     clean_lookup = {(number, op): state for number, op, state in clean_trace}
@@ -508,6 +527,7 @@ def main(argv=None):
     displayed_groups = {}
     displayed_pair = {}
 
+    # Generate target outputs lazily so recovery can stop as soon as all groups are unique.
     def observations():
         for index, mask in enumerate(masks, 1):
             faulty = first_faulty if index == 1 else trace_round8(plaintext, target_key, args.row, args.column, mask)[0]
@@ -525,6 +545,7 @@ def main(argv=None):
             displayed_pair["faulty"] = faulty
             yield faulty
 
+    # Keep display bookkeeping separate from the candidate sets owned by the solver.
     def report(index, column, before, fresh, survivors):
         import attack_steps
         attack_steps.emit(terminal, attack_steps.aes_piret(correct, displayed_pair["faulty"], column, displayed_groups.get(column)))
@@ -537,6 +558,7 @@ def main(argv=None):
         if column == 3:
             terminal.pause()
 
+    # The solver consumes the ciphertext generator and stops when every quartet is unique.
     last_key, used = recover_last_key(correct, observations(), report)
     if last_key is None:
         print(terminal.paint(f"\nAMBIGUOUS after {used} observations. Increase --faults; no key is claimed.", "33"))
@@ -566,6 +588,7 @@ def main(argv=None):
     attack_steps.emit(terminal, attack_steps.verification("aes", plaintext, recovered, correct))
     terminal.section("7. VERIFY THE RECOVERED MASTER KEY")
     print("Recovered K0: " + terminal.paint(recovered.hex().upper(), "1;32"))
+    # Re-encrypt with the recovered key and compare with the independently captured baseline.
     verified = aes_target_encrypt(plaintext, recovered)
     print("Expected ciphertext: " + correct.hex().upper())
     print("Recovered-key AES:   " + verified.hex().upper())

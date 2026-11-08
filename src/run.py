@@ -68,8 +68,10 @@ def aes_demo(terminal, limit, seed):
                     terminal.pause()
             terminal.pair(clean, faulty)
             attack_steps.emit(terminal, attack_steps.aes_piret(clean, faulty, column, survivors))
+            # Use output differences only; the known target key is excluded from this call.
             fresh = piret_aes.key_candidates(clean, faulty, column)
             before = None if survivors is None else len(survivors)
+            # Keep guesses satisfying every observation collected for the current column.
             survivors = fresh if survivors is None else survivors & fresh
             print(f"Candidates in this pair: {len(fresh)}; intersection: {before} -> {len(survivors)}")
             print("First survivors: " + " | ".join(bytes(candidate).hex().upper() for candidate in sorted(survivors)[:4]))
@@ -122,6 +124,7 @@ def reverse_sm4(final_keys, observer=None):
 def show_sm4_peeling(terminal, ciphertext, target_round, recovered_keys):
     """Explain restored words using only subkeys already recovered by DFA."""
     view = ciphertext
+    # Undo later rounds in reverse order so the target becomes the restored final round.
     for number in range(31, target_round, -1):
         words = struct.unpack(">4I", view)[::-1]
         round_key = recovered_keys[number]
@@ -148,6 +151,7 @@ def show_sm4_key_schedule(terminal, recovered_keys):
 def show_sm4_observation(terminal, event, recovered_bytes, start_byte=0, known_bit=None):
     """Explain one byte-DFA or Giraud event without strengthening its model."""
     number, byte = event['round'], event['byte']
+    # Separate previous candidate sets by target round and byte; do not mix observations.
     identity = ('candidates', number, byte)
     attack_steps.emit(terminal, attack_steps.sm4_observation(event, recovered_bytes.get(identity), known_bit))
     recovered_bytes[identity] = set(event['survivors'])
@@ -166,6 +170,7 @@ def show_sm4_observation(terminal, event, recovered_bytes, start_byte=0, known_b
     terminal.pair(bytes.fromhex(event['correct']), bytes.fromhex(event['faulty']))
     print("Undo later rounds using ONLY previously recovered subkeys: " + str(event['peeled_with']))
     terminal.pair(bytes.fromhex(event['clean_view']), bytes.fromhex(event['faulty_view']))
+    # Read restored output words, not hidden internal values from the target simulator.
     clean_words = struct.unpack(">4I", bytes.fromhex(event['clean_view']))
     faulty_words = struct.unpack(">4I", bytes.fromhex(event['faulty_view']))
     shift = 24 - 8 * byte
@@ -174,6 +179,7 @@ def show_sm4_observation(terminal, event, recovered_bytes, start_byte=0, known_b
     print(f"DeltaX = {clean_words[0]:08X} XOR {faulty_words[0]:08X} = {clean_words[0] ^ faulty_words[0]:08X}")
     print(f"DeltaB = L-inverse(DeltaX) = {event['delta_b']:08X}; selected byte difference = {delta:02X}")
     print(f"Known byte q = byte {byte} of (X{number+1} XOR X{number+2} XOR X{number+3}) = {known:02X}")
+    # Unknown-bit Giraud permits eight masks; the controlled-byte DFA uses the known mask.
     if known_bit is False:
         allowed = (1, 2, 4, 8, 16, 32, 64, 128)
         print("UNKNOWN-BIT FILTER: the simulator mask above is NOT given to the candidate solver.")
@@ -190,6 +196,7 @@ def show_sm4_observation(terminal, event, recovered_bytes, start_byte=0, known_b
     print("Survivors: " + " ".join(f"{value:02X}" for value in event['survivors']))
     if event['remaining'] == 1:
         value = event['survivors'][0]
+        # Store uniquely recovered bytes until the four-byte round key can be assembled.
         recovered_bytes.setdefault(number, {})[byte] = value
         print(terminal.paint(f"RECOVERED rk{number} byte {byte} = {value:02X} / UNIQUE", "32"))
         if len(recovered_bytes[number]) == 4:
@@ -221,6 +228,7 @@ def sm4_demo(terminal, limit, start_byte=0):
     print("Repeat independent faults and intersect guesses. Only one survivor identifies a byte.")
     recovered_bytes = {}
 
+    # Run the real SM4 cipher with an external fault callback and show teacher-only propagation.
     def oracle(number, byte, mask):
         faulty, fault_trace = piret_sm4.sm4_fault_encrypt(plaintext, key, byte, mask, number)
         attack_steps.emit(terminal, attack_steps.sm4_fault_trace(trace, fault_trace, number, byte, mask))
@@ -269,6 +277,7 @@ def main(argv=None):
     terminal = LessonTerminal(args.color, args.step)
     print("AES_SM4_DFA.pdf / chapters 2-6 / software demonstration")
     print("RED marks bytes changed by the injected fault, including propagated changes.")
+    # Track success independently for the AES and SM4 demonstrations requested by the command.
     statuses = []
     if args.algorithm in ("all", "aes"):
         statuses.append(aes_demo(terminal, args.observations, args.seed))

@@ -36,6 +36,7 @@ def summary(values):
 
 def flip(data, bit):
     result = bytearray(data)
+    # Convert a bit index to its containing byte and flip exactly that bit.
     result[bit // 8] ^= 1 << (bit % 8)
     return bytes(result)
 
@@ -43,24 +44,29 @@ def flip(data, bit):
 def sbox_metrics(box):
     """Exact DDT and Walsh spectra; exclude zero input/output masks as appropriate."""
     ddt = []
+    # For each nonzero input difference, count S-box output differences over all 256 inputs.
     for delta in range(1, 256):
         counts = Counter(box[x] ^ box[x ^ delta] for x in range(256))
         ddt.append(max(counts.values()))
     walsh_max, degrees = 0, []
     for mask in range(1, 256):
+        # Project the byte S-box output onto one Boolean component using a nonzero output mask.
         truth = [bin(mask & box[x]).count('1') % 2 for x in range(256)]
+        # Copy the truth table before the binary Mobius transform computes ANF coefficients.
         anf = truth[:]
         for bit in range(8):
             for x in range(256):
                 if x & (1 << bit):
                     anf[x] ^= anf[x ^ (1 << bit)]
         degrees.append(max(bin(x).count('1') for x, coefficient in enumerate(anf) if coefficient))
+        # Map Boolean values to +1/-1 before the Walsh-Hadamard transform.
         spectrum = [1 - 2 * bit for bit in truth]
         width = 1
         while width < 256:
             for start in range(0, 256, 2 * width):
                 for j in range(start, start + width):
                     a, b = spectrum[j], spectrum[j + width]
+                    # Each butterfly computes sum and difference; doubling width covers the next input bit.
                     spectrum[j], spectrum[j + width] = a + b, a - b
             width *= 2
         walsh_max = max(walsh_max, max(abs(v) for v in spectrum[1:]))
@@ -87,11 +93,13 @@ def cipher_metrics(name, encrypt, decrypt, box, rng, samples, avalanche_trials, 
     kat = encrypt(vector_pt, vector_key).hex() == expected
     assert kat, name + ' known-answer mismatch'
     avalanche = {}
+    # Measure plaintext-bit and key-bit avalanche separately; they are different experiments.
     for mode in ('plaintext', 'key'):
         distances, bit_counts = [], [0] * 128
         for trial in range(avalanche_trials):
             pt, trial_key = rng.randbytes(16), rng.randbytes(16)
             clean = encrypt(pt, trial_key)
+            # Change one input bit at a time while keeping the other input fixed.
             for bit in range(128):
                 altered = encrypt(flip(pt, bit), trial_key) if mode == 'plaintext' else encrypt(pt, flip(trial_key, bit))
                 distance = hd(clean, altered)
@@ -105,6 +113,7 @@ def cipher_metrics(name, encrypt, decrypt, box, rng, samples, avalanche_trials, 
     outputs = [encrypt(pt, key) for pt in blocks]
     roundtrips = all(decrypt(ct, key) == pt for pt, ct in zip(blocks, outputs))
     assert roundtrips
+    # Estimate output-byte statistics from the sample; these are not proofs of randomness.
     counts = Counter(b''.join(outputs))
     n = 16 * samples
     entropy = -sum((count/n)*math.log2(count/n) for count in counts.values())
@@ -119,6 +128,7 @@ def cipher_metrics(name, encrypt, decrypt, box, rng, samples, avalanche_trials, 
                 fn(block, key)
             times.append((time.perf_counter_ns()-start)/samples)
             cpu_times.append((time.process_time_ns()-cpu)/samples)
+        # Measure Python allocation separately so instrumentation does not distort timing batches.
         tracemalloc.start()
         fn(inputs[0], key)
         _, peak = tracemalloc.get_traced_memory()
@@ -157,6 +167,7 @@ def attack_trial(cipher, model, key, pt):
 
     start = time.perf_counter_ns()
     if cipher == 'SM4':
+        # Select the SM4 candidate model while keeping the same controlled round/byte oracle.
         solver = piret_sm4 if model == 'Piret' else giraud_sm4
         options = {} if model == 'Piret' else dict(known_bit=model == 'Giraud-known')
         result = solver.recover_sm4_master_key(correct, oracle, **options)
@@ -170,6 +181,7 @@ def attack_trial(cipher, model, key, pt):
             history.append(dict(observation=observation, column=column, before=before,
                                 pair_candidates=fresh, remaining=len(survivors)))
         last, _ = piret_aes.recover_last_key(correct, outputs(), observer=record)
+        # Reverse only a uniquely recovered AES final key; ambiguity must remain an explicit failure.
         recovered = piret_aes.reverse_key_schedule(last) if last is not None else None
     else:
         last, complete = bytearray(16), True
@@ -190,6 +202,7 @@ def attack_trial(cipher, model, key, pt):
                 break
         recovered = piret_aes.reverse_key_schedule(bytes(last)) if complete else None
     elapsed = time.perf_counter_ns()-start
+    # Check the simulation ground truth and re-encryption after recovery, never during filtering.
     verified = recovered == key and encrypt(pt, recovered) == correct
     return dict(cipher=cipher, model=model, verified=verified, faults=len(queries),
                 elapsed_ns=elapsed, oracle_ns=oracle_ns, solver_excluding_oracle_ns=elapsed-oracle_ns,
@@ -206,9 +219,11 @@ def main():
     args = parser.parse_args()
     if min(args.samples, args.avalanche_trials, args.attack_trials) < 1:
         parser.error('All sample counts must be positive.')
+    # Use one seeded generator so a repeated configuration produces the same sampled inputs.
     rng = random.Random(args.seed)
     out = ROOT / 'analysis' / 'results'
     out.mkdir(parents=True, exist_ok=True)
+    # Record settings, environment and source hashes so measurements can be traced to this code version.
     report = dict(generated_utc=datetime.now(timezone.utc).isoformat(), configuration=vars(args),
                   environment=dict(python=sys.version, platform=platform.platform(), processor=platform.processor()),
                   source_sha256={name: hashlib.sha256((ROOT/'src'/name).read_bytes()).hexdigest()
