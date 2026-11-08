@@ -223,6 +223,19 @@ The default public vectors include:
 | AES-128 | `00112233445566778899AABBCCDDEEFF` | `000102030405060708090A0B0C0D0E0F` | `69C4E0D86A7B0430D8CDB78070B4C55A` |
 | SM4 | `0123456789ABCDEFFEDCBA9876543210` | `0123456789ABCDEFFEDCBA9876543210` | `681EDF34D206965E86B3E94F536E4246` |
 
+## Reproducible analysis
+
+Install plotting dependencies with `python -m pip install -r analysis/requirements.txt`,
+then run `python analysis/run_analysis.py` to measure plaintext/key avalanche,
+ciphertext statistics, exact S-box differential/linear/algebraic properties,
+encryption/decryption time and Python allocations, and Piret/Giraud key recovery
+for both ciphers. The experiment saves a Portuguese report, raw JSON observations
+and avalanche CSV in [`analysis/results/`](analysis/results/), along with seven
+PNG/SVG figures, a PDF and an HTML gallery. Use `python analysis/plot_results.py`
+to regenerate the figures from saved measurements without repeating experiments.
+See [`analysis/README.md`](analysis/README.md) for sample sizes, reproducibility
+and the distinction between software measurements and physical fault injection.
+
 ## Reading
 
 ### Project references
