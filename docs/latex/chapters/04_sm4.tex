@@ -3,22 +3,92 @@
 \begin{center}\begin{tabular}{ll}\toprule Plaintext&\hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210}\\Master key&\hex{01234567\allowbreak{}89ABCDEF\allowbreak{}FEDCBA98\allowbreak{}76543210}\\Ciphertext&\hex{681EDF34\allowbreak{}D206965E\allowbreak{}86B3E94F\allowbreak{}536E4246}\\\bottomrule\end{tabular}\end{center}
 Split the plaintext into four 32-bit words:
 \[X_0=\hex{01234567},\quad X_1=\hex{89ABCDEF},\quad X_2=\hex{FEDCBA98},\quad X_3=\hex{76543210}.\]
-\section{SM4 round function}
+\section{Encryption}
 SM4 performs 32 rounds, producing one new 32-bit word per round:
 \[\boxed{X_{i+4}=X_i\xor T(X_{i+1}\xor X_{i+2}\xor X_{i+3}\xor rk_i)}.\]
-Write \(T=L\circ\tau\), where \(\tau\) substitutes the four bytes through the SM4 S-box and
-\[L(B)=B\xor(B\rol2)\xor(B\rol10)\xor(B\rol18)\xor(B\rol24).\]
+Write \(T=L\circ\tau\), combining byte substitution and linear diffusion.
 The output reverses the final four words:
 \[C=X_{35}\parallel X_{34}\parallel X_{33}\parallel X_{32}.\]
-\section{SM4 key expansion}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\linewidth]{figures/encryption.png}
+\caption{One SM4 encryption round. The four 32-bit input words advance by one position, and the newly computed word is appended.}
+\label{fig:sm4-encryption}
+\end{figure}
+The diagram uses \(W_0,\ldots,W_3\) for the input window and \(R_0,\ldots,R_3\) for the next window. Its intermediate \(X\) is the S-box output, denoted \(B\) below.
+\section{Nonlinear Transformation: S-box}
+The nonlinear transformation \(\tau\) applies the same SM4 S-box independently to each of the four bytes of a 32-bit word:
+\[\tau(A)=S(a_0)\parallel S(a_1)\parallel S(a_2)\parallel S(a_3),\quad A=a_0\parallel a_1\parallel a_2\parallel a_3.\]
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=.48\linewidth]{figures/sbox.png}
+\caption{Four parallel 8-bit S-box substitutions form the nonlinear transformation.}
+\label{fig:sm4-sbox}
+\end{figure}
+\section{Linear Transformation}
+After byte substitution, encryption combines the 32-bit word with four circular left rotations:
+\[L(B)=B\xor(B\rol2)\xor(B\rol10)\xor(B\rol18)\xor(B\rol24).\]
+The arrows marked with rotation amounts represent circular rotations, not shifts that discard bits.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=.95\linewidth]{figures/linearT.png}
+\caption{SM4 encryption diffusion: XOR of the original word and rotations by 2, 10, 18 and 24 bits.}
+\label{fig:sm4-linear}
+\end{figure}
+\section{Key Expansion}
 The four initial key-schedule words are \(K_i=MK_i\xor FK_i\), with
 \[\begin{array}{ll}FK_0=\hex{A3B1BAC6},&FK_1=\hex{56AA3350},\\FK_2=\hex{677D9197},&FK_3=\hex{B27022DC}.\end{array}\]
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=.33\linewidth]{figures/keyTbegin.png}
+\caption{Initialization of the four key-schedule words by XOR with the fixed system parameters.}
+\label{fig:sm4-key-initialization}
+\end{figure}
 The key-schedule recurrence is
 \[K_{i+4}=K_i\xor T'(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i),\quad rk_i=K_{i+4},\]
 with \(T'=L'\circ\tau\) and
 \[L'(B)=B\xor(B\rol13)\xor(B\rol23).\]
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.0\linewidth]{figures/keyT.png}
+\caption{One SM4 key-expansion round. The round constant replaces the encryption round key, and the linear transformation uses rotations by 13 and 23 bits.}
+\label{fig:sm4-key-expansion}
+\end{figure}
 \textbf{Crucial distinction:} encryption uses \(L\), while key expansion uses \(L'\). They have different rotation constants.
 For the first round, \(rk_0=\hex{F12186F9}\).
+
+\subsection{How the public round constants are generated}
+SM4 defines 32 public 32-bit constants \(CK_i\), one per key-expansion round. For \(i=0,\ldots,31\) and byte index \(j=0,\ldots,3\),
+\[
+\boxed{ck_{i,j}=7(4i+j)\bmod256},\qquad
+CK_i=ck_{i,0}\parallel ck_{i,1}\parallel ck_{i,2}\parallel ck_{i,3}.
+\]
+Concatenation is big-endian. Reduction modulo 256 keeps each result within one byte; it is ordinary integer arithmetic, not multiplication in \(GF(2^8)\).
+
+\begin{center}
+\begin{tabular}{cll}\toprule
+Round \(i\)&Four bytes in decimal&\(CK_i\) in hexadecimal\\\midrule
+0&0, 7, 14, 21&\hex{00070E15}\\
+1&28, 35, 42, 49&\hex{1C232A31}\\
+2&56, 63, 70, 77&\hex{383F464D}\\
+31&100, 107, 114, 121&\hex{646B7279}\\\bottomrule
+\end{tabular}
+\end{center}
+For example, \(ck_{31,0}=7\times124\bmod256=868\bmod256=100=\hex{64}\).
+An implementation can compute these constants or store the same values in a table.
+
+\subsection{Where the system parameters FK come from}
+The four \(FK_i\) words listed above are fixed system parameters specified directly by SM4. The specification supplies their values rather than a CK-style generation formula. They initialize \(K_i=MK_i\xor FK_i\) for \(i=0,1,2,3\); they are not 32 per-round constants.
+
+Neither CK nor FK depends on the secret key or plaintext. The attacker knows both sets before collecting faults; recovering four consecutive final subkeys remains necessary for the schedule reversal described later.
+
+\noindent\textit{Source:} \href{https://datatracker.ietf.org/doc/html/draft-crypto-sm4-00#section-7.3.2}{SM4 Internet-Draft, Sections 7.3.2--7.3.3} (public algorithm description; not an RFC).
+
 \section{Detailed computation of encryption round 0}
 \paragraph{Step 1: XOR the three newest words with the round key.}
 \[A=X_1\xor X_2\xor X_3\xor rk_0=\hex{F002C39E}.\]

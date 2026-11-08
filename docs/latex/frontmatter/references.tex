@@ -4,4 +4,4 @@
 \item NIST, \emph{FIPS 197: Advanced Encryption Standard (AES)} (algorithm and official AES test vector).
 \item ISO/IEC 18033-3, \emph{Encryption algorithms --- Part 3: Block ciphers} (SM4 specification); SM4 test vector as reproduced in the supplied notes.
 \end{enumerate}
-\note{The SM4 DFA chapter uses a deliberately strong fault assumption: known XOR magnitude at a specified S-box input. Experimental fault injection must establish whether that assumption is justified. The included Python code demonstrates full recovery with a simulated multi-round fault oracle; no full physical recovery of all four SM4 final round keys is claimed here.}
+\note{The SM4 DFA chapter uses a deliberately strong fault assumption: known XOR magnitude at a specified S-box input. Experimental fault injection must establish whether that assumption is justified. Full recovery requires additional observations from earlier rounds; no full physical recovery of all four SM4 final round keys is claimed here.}

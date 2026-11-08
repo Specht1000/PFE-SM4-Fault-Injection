@@ -134,7 +134,7 @@ Recovering $rk_{31}$ is not equivalent to recovering the 128-bit master key. The
 rk_{28}&=\hex{428D3654},&rk_{29}&=\hex{62293496},\\
 rk_{30}&=\hex{01CF72E5},&rk_{31}&=\hex{9124A012}.
 \end{align*}
-The values $rk_{28}$, $rk_{29}$ and $rk_{30}$ are \emph{reference values}, not keys shown to have been recovered by the two last-round faults. The two last-round faults do not recover these other keys. The implemented multi-round extension in the attack walkthrough in Part 2 obtains them by requesting new faults in rounds 30, 29 and 28 and undoing previously recovered later rounds.
+The values $rk_{28}$, $rk_{29}$ and $rk_{30}$ are \emph{reference values}, not keys shown to have been recovered by the two last-round faults. The two last-round faults do not recover these other keys. A multi-round extension requires additional faults in rounds 30, 29 and 28 and inversion of the already recovered later rounds.
 
 With four consecutive round keys, set $K_{i+4}=rk_i$ and invert the SM4 recurrence:
 \begin{equation}

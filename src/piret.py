@@ -634,12 +634,11 @@ def main(argv=None):
     masks = random.Random(args.seed).sample(range(1, 256), args.faults)
     first_faulty, first_trace = trace_round8(plaintext, target_key, args.row, args.column, masks[0])
     clean_lookup = {(number, op): state for number, op, state in clean_trace}
-    selected = {(8, "ShiftRows"), (8, "Fault point"), (8, "MixColumns"), (9, "SubBytes"), (9, "ShiftRows"), (9, "MixColumns"), (10, "AddRoundKey")}
     terminal.section("2. TEACHER VIEW: WHAT CHANGES INSIDE THE AES STATE")
     print(f"First simulated fault: row {args.row}, column {args.column}, XOR mask {masks[0]:02X}.")
     print("Red = modified byte or nonzero XOR. These hidden states are NOT solver inputs.")
     for number, operation, state in first_trace:
-        if (number, operation) in selected:
+        if number >= 8:
             print(terminal.paint(f"\nRound {number:02d} / {operation}", "1;33"))
             terminal.compare(clean_lookup[number, operation], state)
             terminal.pause()
@@ -656,6 +655,9 @@ def main(argv=None):
     terminal.pause()
     terminal.section("4. ATTACKER VIEW: COLLECT OUTPUTS AND INTERSECT CANDIDATE TUPLES")
 
+    displayed_groups = {}
+    displayed_pair = {}
+
     def observations():
         for index, mask in enumerate(masks, 1):
             faulty = first_faulty if index == 1 else trace_round8(plaintext, target_key, args.row, args.column, mask)[0]
@@ -663,9 +665,20 @@ def main(argv=None):
             print("Correct: " + correct.hex().upper())
             print("Faulty:  " + faulty.hex().upper())
             print("XOR:     " + bytes(a ^ b for a, b in zip(correct, faulty)).hex().upper())
+            if index > 1:
+                _, propagation = trace_round8(plaintext, target_key, args.row, args.column, mask)
+                for number, operation, state in propagation:
+                    if number >= 8:
+                        print(f"R{number:02d} {operation}")
+                        terminal.compare(clean_lookup[number, operation], state)
+                        terminal.pause()
+            displayed_pair["faulty"] = faulty
             yield faulty
 
     def report(index, column, before, fresh, survivors):
+        import attack_steps
+        attack_steps.emit(terminal, attack_steps.aes_piret(correct, displayed_pair["faulty"], column, displayed_groups.get(column)))
+        displayed_groups[column] = set(survivors)
         after = len(survivors)
         print(f"  Group {column}: {fresh} tuples satisfy this pair.")
         print("    Remaining: " + ("unconstrained" if before is None else str(before)) + " -> " + terminal.paint(str(after), "32" if after == 1 else "33") + ("" if before is None else f" ({before-after} eliminated)"))
@@ -697,12 +710,10 @@ def main(argv=None):
     print("Forward: w[i] = w[i-4] XOR T(w[i-1]); reverse: w[i-4] = w[i] XOR T(w[i-1]).")
     print("T is RotWord -> SubWord -> Rcon when i is a multiple of 4; otherwise T is identity.")
 
-    def schedule_report(index, current, transformed, previous):
-        print(f"w[{index-4:02d}] = w[{index:02d}] XOR T(w[{index-1:02d}]) = {current.hex().upper()} XOR {transformed.hex().upper()} = " + terminal.paint(previous.hex().upper(), "32"))
-        if index % 4 == 0:
-            terminal.pause()
-
-    recovered = reverse_key_schedule(last_key, schedule_report)
+    import attack_steps
+    recovered, schedule_steps = attack_steps.aes_schedule(last_key)
+    attack_steps.emit(terminal, schedule_steps)
+    attack_steps.emit(terminal, attack_steps.verification("aes", plaintext, recovered, correct))
     terminal.section("7. VERIFY THE RECOVERED MASTER KEY")
     print("Recovered K0: " + terminal.paint(recovered.hex().upper(), "1;32"))
     verified = aes_target_encrypt(plaintext, recovered)

@@ -231,9 +231,12 @@ def main(argv=None):
 
         if not is_aes:
             recovered_bytes = {}
+            _, clean_target_trace = sm4_fault_encrypt(plaintext, key)
 
             def oracle(number, byte, mask):
-                return sm4_fault_encrypt(plaintext, key, byte, mask, number)[0]
+                faulty, fault_trace = sm4_fault_encrypt(plaintext, key, byte, mask, number)
+                target.attack_steps.emit(terminal, target.attack_steps.sm4_fault_trace(clean_target_trace, fault_trace, number, byte, mask))
+                return faulty
 
             def show(event):
                 target.show_sm4_observation(terminal, event, recovered_bytes, known_bit=args.known_bit)
@@ -246,6 +249,7 @@ def main(argv=None):
             for number, value in result['round_keys'].items():
                 print(f"Recovered rk{number}: {value:08X}")
             master = target.show_sm4_key_schedule(terminal, result['round_keys'])
+            target.attack_steps.emit(terminal, target.attack_steps.verification("sm4", plaintext, master, correct))
             verified_ciphertext = sm4.sm4_encrypt_block(plaintext, master)
             if master != result['master_key'] or master != key or verified_ciphertext != correct:
                 raise RuntimeError("SM4 full master-key verification failed.")
@@ -264,13 +268,13 @@ def main(argv=None):
                 position, fresh = aes_candidates(correct, faulty, mask if args.known_bit else None)
                 used += 1
                 before = 256 if survivors is None else len(survivors)
+                target.attack_steps.emit(terminal, target.attack_steps.aes_giraud(correct, faulty, position, survivors, mask if args.known_bit else None))
                 survivors = intersect_candidates(survivors, fresh)
                 print(f"\nKey byte {position}, observation {observation}, simulator mask {mask:02X}")
                 print(f"Fault before final SubBytes: input byte {byte}, row {byte%4}, column {byte//4} -> ciphertext/K10 byte {position} after ShiftRows.")
-                if byte == 0 and observation == 1:
-                    for operation, state in fault_trace.items():
-                        print("Final-round stage: " + operation)
-                        terminal.pair(clean_trace[operation], state)
+                for operation, state in fault_trace.items():
+                    print("Final-round stage: " + operation)
+                    terminal.pair(clean_trace[operation], state)
                 allowed = (mask,) if args.known_bit else SINGLE_BITS
                 print("Allowed input errors: " + " ".join(f"{value:02X}" for value in allowed))
                 print("The simulator mask is NOT given to the candidate solver." if not args.known_bit else "The candidate solver receives the exact mask.")
@@ -298,6 +302,7 @@ def main(argv=None):
             continue
         print("\nAssemble K10 in ciphertext byte order: " + " || ".join(f"{value:02X}" for value in recovered))
         master = target.show_aes_key_schedule(terminal, recovered)
+        target.attack_steps.emit(terminal, target.attack_steps.verification("aes", plaintext, master, correct))
         verified_ciphertext = piret.aes_target_encrypt(plaintext, master)
         if master != key or verified_ciphertext != correct:
             raise RuntimeError("AES key verification failed.")

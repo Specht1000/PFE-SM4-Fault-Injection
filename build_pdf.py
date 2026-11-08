@@ -90,7 +90,7 @@ def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--part", type=int, choices=range(12), default=0, help="0 builds the entire report; 1..11 selects a part.")
+    parser.add_argument("--part", type=int, choices=(0, 1), default=0, help="0 builds the report; 1 selects the theory entry point.")
     args = parser.parse_args()
     try:
         build(args.part)
