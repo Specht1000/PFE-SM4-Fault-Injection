@@ -104,4 +104,6 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.path.insert(0, str(ROOT / "src"))
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "build_pdf"))

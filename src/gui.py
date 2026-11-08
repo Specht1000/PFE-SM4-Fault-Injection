@@ -4,12 +4,15 @@ import queue
 import random
 import struct
 import threading
+import traceback
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import aes
 import sm4
 import run as console
-import giraud
+import giraud_aes
+import giraud_sm4
+from giraud_common import masks_for, intersect_candidates
 import attack_steps
 
 AES_KEY = "000102030405060708090a0b0c0d0e0f"
@@ -31,14 +34,14 @@ def snapshot(number, title, explanation, state, detail="", reference=None):
 
 
 def aes_trace(block, key, decrypt=False, fault=None):
-    """Display the actual cipher execution; fault injection stays in piret.py."""
+    """Display the actual cipher execution; fault injection stays in piret_aes.py."""
     steps = [snapshot(10 if decrypt else 0, "Input", "AES byte index = 4*column + row.", block)]
     keys = aes.key_expansion(key)
     descriptions = {"SubBytes": "Replace each byte through the nonlinear S-box.", "ShiftRows": "Rotate row r left by r positions.", "MixColumns": "Mix each column in GF(2^8).", "AddRoundKey": "XOR the state with the current round key.", "InvSubBytes": "Undo the nonlinear substitution.", "InvShiftRows": "Rotate rows right to undo ShiftRows.", "InvMixColumns": "Multiply columns by the inverse mixing matrix."}
     if fault:
         if decrypt:
             raise ValueError("Piret fault injection is an encryption experiment.")
-        ciphertext, trace = console.piret.encrypt_with_trace(block, key, fault[1], fault[2], fault[3], fault_round=fault[0])
+        ciphertext, trace = console.piret_aes.encrypt_with_trace(block, key, fault[1], fault[2], fault[3], fault_round=fault[0])
         initial = aes.bytes_to_state(block)
         aes.add_round_key(initial, keys[0])
         steps.append(snapshot(0, "AddRoundKey", descriptions["AddRoundKey"], aes.state_to_bytes(initial)))
@@ -89,16 +92,16 @@ def sm4_trace(block, key, decrypt=False):
 
 def positions(column):
     """Presentation alias for the attack's final-ShiftRows position mapping."""
-    return console.piret.output_positions(column)
+    return console.piret_aes.output_positions(column)
 
 
 def candidates(correct, faulty, column):
     """Candidate filtering belongs to the attack module, not the GUI."""
-    return console.piret.key_candidates(correct, faulty, column)
+    return console.piret_aes.key_candidates(correct, faulty, column)
 
 
 def reverse_schedule(last_key):
-    return console.piret.reverse_key_schedule(last_key)
+    return console.piret_aes.reverse_key_schedule(last_key)
 
 
 def recover_key(correct, observations):
@@ -108,7 +111,7 @@ def recover_key(correct, observations):
     def record(index, column, before, fresh, survivors):
         history.append((index, column, fresh, len(survivors)))
 
-    key, used = console.piret.recover_last_key(correct, observations, observer=record)
+    key, used = console.piret_aes.recover_last_key(correct, observations, observer=record)
     return key, history, used
 
 
@@ -130,7 +133,7 @@ def piret_lesson(block, key, row, column, mask, maximum):
     for index, group, count, remaining in history:
         pair = outputs[index-1]
         steps.extend(attack_steps.aes_piret(clean_ct, pair, group, previous_groups.get(group)))
-        fresh = console.piret.key_candidates(clean_ct, pair, group)
+        fresh = console.piret_aes.key_candidates(clean_ct, pair, group)
         previous_groups[group] = fresh if group not in previous_groups else previous_groups[group] & fresh
         detail = f"Correct: {clean_ct.hex()}\nFaulty #{index}: {outputs[index-1].hex()}\nGroup {group} output positions: {positions(group)}\nCandidates from this pair: {count}\nCandidates after intersection: {remaining}\nSolver inputs: ciphertexts only; no key, mask or intermediate states."
         steps.append(snapshot(10, f"Observation {index} / group {group}", "Each independent fault filters candidate tuples. A unique tuple reveals four K10 bytes.", outputs[index-1], detail, clean_ct))
@@ -166,7 +169,7 @@ def pdf_aes_lesson(block, key, row, column, mask, maximum):
                     reference = lookup[(9, "ShiftRows")] if step["title"] == "Injected XOR" else lookup[(step["round"], step["title"])]
                     steps.append(dict(step, title=f"Column {group} / {step['title']}", reference=reference["state"]))
             steps.extend(attack_steps.aes_piret(correct, faulty, group, survivors))
-            fresh = console.piret.key_candidates(correct, faulty, group)
+            fresh = console.piret_aes.key_candidates(correct, faulty, group)
             before = None if survivors is None else len(survivors)
             survivors = fresh if survivors is None else survivors & fresh
             if not survivors:
@@ -192,13 +195,13 @@ def pdf_aes_lesson(block, key, row, column, mask, maximum):
 
 def sm4_master_lesson(block, key, start_byte, mask, maximum, giraud_mode=False, known_bit=False):
     """Show output-only full recovery; no reference subkeys are supplied."""
-    correct, target_trace = console.piret.sm4_fault_encrypt(block, key)
+    correct, target_trace = console.piret_sm4.sm4_fault_encrypt(block, key)
     _, steps = sm4_trace(block, key)
     model = "Giraud-inspired SM4 / full master-key recovery" if giraud_mode else "SM4 controlled DFA / full master-key recovery"
     steps.append(snapshot(31, "Full recovery fault model", "Extend the PDF model to faults in rounds 31, 30, 29 and 28.", correct, "Recover the latest subkey first; undo only rounds with previously recovered keys. No reference subkeys."))
 
     def oracle(number, byte, value):
-        target = giraud.sm4_fault_encrypt if giraud_mode else console.piret.sm4_fault_encrypt
+        target = giraud_sm4.sm4_fault_encrypt if giraud_mode else console.piret_sm4.sm4_fault_encrypt
         faulty, fault_trace = target(block, key, byte, value, number)
         steps.extend(attack_steps.sm4_fault_trace(target_trace, fault_trace, number, byte, value))
         return faulty
@@ -216,10 +219,10 @@ def sm4_master_lesson(block, key, start_byte, mask, maximum, giraud_mode=False, 
         steps.append(snapshot(event['round'], f"rk{event['round']} / byte {event['byte']} / observation {event['observation']}", "Undo later rounds with recovered subkeys, then filter candidates from the restored difference.", bytes.fromhex(event['faulty_view']), detail, bytes.fromhex(event['clean_view'])))
 
     if giraud_mode:
-        result = giraud.recover_sm4_master_key(correct, oracle, mask, maximum, known_bit, start_byte, show)
+        result = giraud_sm4.recover_sm4_master_key(correct, oracle, mask, maximum, known_bit, start_byte, show)
     else:
         masks = [mask] + [v for v in range(1, 256) if v != mask][:maximum-1]
-        result = console.piret.recover_sm4_master_key(correct, oracle, masks, start_byte, observer=show)
+        result = console.piret_sm4.recover_sm4_master_key(correct, oracle, masks, start_byte, observer=show)
     complete, recovered = result['complete'], result['master_key']
     if complete:
         displayed, schedule_steps = attack_steps.sm4_schedule(result['round_keys'])
@@ -245,8 +248,8 @@ def pdf_sm4_lesson(block, key, start_byte, mask, maximum):
 # Giraud target simulation and visual explanations belong to this GUI module.
 
 def aes_giraud_encrypt(plaintext, key, byte=0, mask=None):
-    """GUI adapter only; giraud.py performs the external cipher intervention."""
-    return giraud.aes_fault_encrypt(plaintext, key, byte, mask)
+    """GUI adapter only; giraud_aes.py performs the external cipher intervention."""
+    return giraud_aes.aes_fault_encrypt(plaintext, key, byte, mask)
 
 
 def giraud_lesson(algorithm, plaintext, key, row=0, column=0, mask=1, maximum=8, known_bit=False):
@@ -259,13 +262,13 @@ def giraud_lesson(algorithm, plaintext, key, row=0, column=0, mask=1, maximum=8,
         raise ValueError('Choose AES-128 or SM4, with row/column in 0..3.')
     aes.validate_block(plaintext)
     aes.validate_block(key, 'Key')
-    masks = giraud.masks_for(mask, maximum)
+    masks = masks_for(mask, maximum)
     if algorithm == 'SM4':
         return sm4_master_lesson(plaintext, key, row, mask, maximum, True, known_bit)
     count = 16
     first = 4 * column + row
     correct, clean_trace = aes_giraud_encrypt(plaintext, key)
-    if correct != console.piret.aes_target_encrypt(plaintext, key):
+    if correct != console.piret_aes.aes_target_encrypt(plaintext, key):
         raise RuntimeError('AES simulator differs from aes.py.')
     steps = [snapshot(10, 'Giraud fault model', 'One bit before the last nonlinear layer. The bit is ' + ('KNOWN' if known_bit else 'UNKNOWN') + ' to the candidate solver.', correct, 'AES: no final MixColumns; one altered output byte.\nSM4 adaptation: invert L to isolate one S-box output difference.\nPDF chapter 7. Target location is not sufficient to identify the bit.\nThe simulator key and internal states are not solver inputs.')]
     recovered, remaining, history = (bytearray(count), [256] * count, [])
@@ -275,7 +278,7 @@ def giraud_lesson(algorithm, plaintext, key, row=0, column=0, mask=1, maximum=8,
         survivors = None
         for observation, actual_mask in enumerate(masks, 1):
             faulty, fault_trace = aes_giraud_encrypt(plaintext, key, target, actual_mask)
-            position, fresh = giraud.aes_candidates(correct, faulty, actual_mask if known_bit else None)
+            position, fresh = giraud_aes.aes_candidates(correct, faulty, actual_mask if known_bit else None)
             input_column, input_row = divmod(target, 4)
             expected = 4 * ((input_column - input_row) % 4) + input_row
             if position != expected:
@@ -287,7 +290,7 @@ def giraud_lesson(algorithm, plaintext, key, row=0, column=0, mask=1, maximum=8,
             first_faulty = first_faulty or faulty
             before = 256 if survivors is None else len(survivors)
             steps.extend(attack_steps.aes_giraud(correct, faulty, position, survivors, actual_mask if known_bit else None))
-            survivors = giraud.intersect_candidates(survivors, fresh)
+            survivors = intersect_candidates(survivors, fresh)
             remaining[position] = len(survivors)
             history.append(dict(observation=observation, target=position, before=before, pair_candidates=len(fresh), remaining=len(survivors), simulator_mask=actual_mask))
             detail += f'\nKey-byte candidates in this pair: {len(fresh)}\nIntersection: {before} -> {len(survivors)}\nSurvivors: ' + ' '.join((f'{value:02X}' for value in sorted(survivors)))
@@ -303,13 +306,31 @@ def giraud_lesson(algorithm, plaintext, key, row=0, column=0, mask=1, maximum=8,
     master, schedule_steps = attack_steps.aes_schedule(recovered)
     steps.extend(schedule_steps)
     steps.extend(attack_steps.verification("aes", plaintext, master, correct))
-    if master != key or console.piret.aes_target_encrypt(plaintext, master) != correct:
+    if master != key or console.piret_aes.aes_target_encrypt(plaintext, master) != correct:
         raise RuntimeError('Giraud AES recovered-key verification failed.')
     report.update(recovered_key=master.hex(), recovered_last_key=recovered.hex())
     detail = f'Recovered K10: {recovered.hex()}\nRecovered K0: {master.hex()}\nRe-encryption and target-key checks: PASS'
     explanation = 'All 16 K10 bytes are unique. Reverse the AES-128 key schedule to recover K0.'
     steps.append(snapshot(10, 'Verified recovery result', explanation, correct, detail + f'\nUsed {used} faulty outputs.'))
     return report
+
+
+def log_report(report):
+    """Mirror a completed GUI lesson to the terminal and the active session log."""
+    terminal = console.LessonTerminal("always")
+    terminal.section(f"GUI: {report['algorithm']} / {report['operation']}")
+    print(f"Input: {report['input']}\nKey: {report['key']}")
+    previous = report['input']
+    for index, event in enumerate(report['steps'], 1):
+        print(f"GUI step {index}/{len(report['steps'])}; round {event['round']}")
+        print(event['explanation'])
+        print(f"Displayed state: {event['state']}")
+        console.attack_steps.emit(terminal, [dict(event, reference=event['reference'] or previous)])
+        previous = event['state']
+    print(f"Output: {report['output']}")
+    if report.get('recovered_key'):
+        print(f"Recovered master key: {report['recovered_key']}")
+    print("Verification: " + ("PASS" if report['verified'] else "AMBIGUOUS"))
 
 
 class CryptoLab:
@@ -514,7 +535,7 @@ class CryptoLab:
                 if not (0 <= row < 4 and 0 <= column < 4 and 1 <= mask <= 255 and 1 <= maximum <= 20):
                     raise ValueError("Fault settings: row/column 0..3, mask 01..FF, observations 1..20.")
                 if self.operation.get() == "Giraud attack":
-                    giraud.masks_for(mask, maximum)
+                    masks_for(mask, maximum)
         except (ValueError, tk.TclError) as error:
             messagebox.showerror("Invalid input", str(error), parent=self.root)
             return
@@ -543,8 +564,10 @@ class CryptoLab:
                     raise RuntimeError("Inverse verification failed.")
                 report = dict(steps=steps, output=output.hex(), recovered=recovered.hex(), verified=True)
             report.update(algorithm=algorithm, operation=operation, key=key.hex(), input=block.hex())
+            log_report(report)
             self.messages.put((report, None))
         except Exception as error:
+            traceback.print_exc()
             self.messages.put((None, str(error)))
 
     def poll(self):
@@ -686,7 +709,14 @@ class CryptoLab:
         self.root.destroy()
 
 
-if __name__ == "__main__":
+def main():
+    """Keep one overwritten log per GUI session, including every built lesson."""
     window = tk.Tk()
+    window.report_callback_exception = traceback.print_exception
     CryptoLab(window)
     window.mainloop()
+
+
+if __name__ == "__main__":
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "gui"))

@@ -3,7 +3,8 @@ from itertools import product
 import struct
 import aes
 import sm4
-import piret
+import piret_aes
+import piret_sm4
 
 
 def step(number, title, lines, correct, faulty=None):
@@ -21,15 +22,15 @@ def tuples(items):
 
 def aes_piret(correct, faulty, column, previous=None):
     """Enumerate all 1024 byte guesses, 1020 fault patterns and candidate tuples."""
-    positions = piret.output_positions(column)
+    positions = piret_aes.output_positions(column)
     yield step(10, f"Group {column}: ciphertexts and ShiftRows mapping", [f"C = {correct.hex().upper()}", f"F = {faulty.hex().upper()}", f"C XOR F = {bytes(a ^ b for a, b in zip(correct, faulty)).hex().upper()}", f"Pre-ShiftRows rows 0..3 map to output positions {positions}.", "The solver receives neither the fault mask nor the target key."], correct, faulty)
     tables = []
     for row, position in enumerate(positions):
         table = [[] for _ in range(256)]
         lines = [f"Row {row}; ciphertext/key position {position}. Test every k=00..FF."]
         for guess in range(256):
-            left = piret.INV_SBOX[correct[position] ^ guess]
-            right = piret.INV_SBOX[faulty[position] ^ guess]
+            left = piret_aes.INV_SBOX[correct[position] ^ guess]
+            right = piret_aes.INV_SBOX[faulty[position] ^ guess]
             delta = left ^ right
             table[delta].append(guess)
             lines.append(f"k={guess:02X}: InvS[{correct[position] ^ guess:02X}] XOR InvS[{faulty[position] ^ guess:02X}] = {left:02X} XOR {right:02X} = {delta:02X}")
@@ -39,12 +40,12 @@ def aes_piret(correct, faulty, column, previous=None):
     for fault_row in range(4):
         lines = [f"Unknown error row = {fault_row}. Test every nonzero e=01..FF.", "All four equations must share the SAME row and error; independent byte sets are insufficient."]
         for error in range(1, 256):
-            pattern = [piret.gf_multiply(piret.MIX_MATRIX[row][fault_row], error) for row in range(4)]
+            pattern = [piret_aes.gf_multiply(piret_aes.MIX_MATRIX[row][fault_row], error) for row in range(4)]
             choices = [tables[row][pattern[row]] for row in range(4)]
             count = 1
             for choice in choices:
                 count *= len(choice)
-            lines.append(f"e={error:02X}; matrix coefficients={[piret.MIX_MATRIX[row][fault_row] for row in range(4)]}; d=" + " ".join(f"{value:02X}" for value in pattern) + "; byte choices=" + " / ".join(values(choice) for choice in choices) + f"; tuples={count} / " + ("ACCEPT" if count else "REJECT"))
+            lines.append(f"e={error:02X}; matrix coefficients={[piret_aes.MIX_MATRIX[row][fault_row] for row in range(4)]}; d=" + " ".join(f"{value:02X}" for value in pattern) + "; byte choices=" + " / ".join(values(choice) for choice in choices) + f"; tuples={count} / " + ("ACCEPT" if count else "REJECT"))
             fresh.update(product(*choices))
         yield step(10, f"Group {column}: all patterns for fault row {fault_row}", lines, correct, faulty)
     survivors = fresh if previous is None else previous & fresh
@@ -60,8 +61,8 @@ def aes_giraud(correct, faulty, position, previous=None, known_mask=None):
     lines = [f"Output/K10 byte {position}; allowed input errors: {values(allowed)}", "Unknown-bit mode tests all eight single-bit errors; the simulator mask is not an input."]
     fresh = set()
     for guess in range(256):
-        left = piret.INV_SBOX[correct[position] ^ guess]
-        right = piret.INV_SBOX[faulty[position] ^ guess]
+        left = piret_aes.INV_SBOX[correct[position] ^ guess]
+        right = piret_aes.INV_SBOX[faulty[position] ^ guess]
         delta = left ^ right
         accepted = delta in allowed
         if accepted:
@@ -100,7 +101,7 @@ def sm4_observation(event, previous=None, known_bit=None):
     lines = [f"DeltaX = {c[0]:08X} XOR {f[0]:08X} = {delta_x:08X}", "L is linear over GF(2). Apply inverse L to each set bit, then XOR contributions."]
     accumulated = 0
     for bit in range(32):
-        basis = piret.inverse_linear(1 << bit)
+        basis = piret_sm4.inverse_linear(1 << bit)
         contribution = basis if delta_x & (1 << bit) else 0
         accumulated ^= contribution
         lines.append(f"bit {bit:02d}: input={(delta_x >> bit) & 1}; inverse basis={basis:08X}; contribution={contribution:08X}; running XOR={accumulated:08X}")
@@ -151,7 +152,7 @@ def aes_schedule(last_key):
         if (index-4) % 4 == 0:
             lines.append(f"DERIVED K{(index-4)//4} = {b''.join(words[index-4:index]).hex().upper()}")
         events.append(step((index-4)//4, f"Reverse AES schedule: w[{index-4}]", lines, last_key))
-    master = piret.reverse_key_schedule(last_key, record)
+    master = piret_aes.reverse_key_schedule(last_key, record)
     events.append(step(0, "Assemble AES master key", ["K0 = w[0] || w[1] || w[2] || w[3]", master.hex().upper()], master))
     return master, events
 
@@ -174,7 +175,7 @@ def sm4_schedule(keys):
         if index >= 4:
             lines.append(f"DERIVED rk{index-4} = {recovered:08X}")
         events.append(step(index, f"Reverse SM4 schedule: K[{index}]", lines, state))
-    master = piret.reverse_sm4(words[32:], record)
+    master = piret_sm4.reverse_sm4(words[32:], record)
     for i in range(4):
         events.append(step(0, f"Remove FK[{i}]", [f"MK[{i}] = K[{i}] XOR FK[{i}] = {words[i]:08X} XOR {sm4.FK[i]:08X} = {words[i] ^ sm4.FK[i]:08X}"], master))
     events.append(step(0, "Assemble SM4 master key", ["MK = MK[0] || MK[1] || MK[2] || MK[3]", master.hex().upper()], master))

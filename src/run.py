@@ -4,7 +4,8 @@ import random
 import struct
 import aes
 import sm4
-import piret
+import piret_aes
+import piret_sm4
 import attack_steps
 
 
@@ -15,7 +16,7 @@ def block(value):
     return data
 
 
-class LessonTerminal(piret.Terminal):
+class LessonTerminal(piret_aes.Terminal):
     def changed(self, original, faulty):
         return " ".join(self.paint(f"{value:02X}", "31") if value != original[i] else f"{value:02X}" for i, value in enumerate(faulty))
 
@@ -31,8 +32,8 @@ def aes_demo(terminal, limit, seed):
     terminal.section("AES / PDF CHAPTER 2: ENCRYPTION")
     print("Key: " + key.hex().upper() + "\nPlaintext: " + plaintext.hex().upper())
     print("AES layout: index = 4*column + row. This execution has no fault.")
-    clean, trace = piret.trace_round8(plaintext, key, fault_round=9)
-    if clean != piret.aes_target_encrypt(plaintext, key):
+    clean, trace = piret_aes.trace_round8(plaintext, key, fault_round=9)
+    if clean != piret_aes.aes_target_encrypt(plaintext, key):
         raise RuntimeError("AES trace differs from aes.py.")
     keys = aes.key_expansion(key)
     for number, round_key in enumerate(keys):
@@ -53,9 +54,9 @@ def aes_demo(terminal, limit, seed):
     last_key, total = bytearray(16), 0
     for column in range(4):
         survivors = None
-        print(f"\nCOLUMN {column}: output/key positions {piret.output_positions(column)}")
+        print(f"\nCOLUMN {column}: output/key positions {piret_aes.output_positions(column)}")
         for observation, mask in enumerate(masks, 1):
-            faulty, faulty_trace = piret.trace_round8(plaintext, key, 0, column, mask, fault_round=9)
+            faulty, faulty_trace = piret_aes.trace_round8(plaintext, key, 0, column, mask, fault_round=9)
             total += 1
             print(f"\nObservation {observation}: simulator XOR {mask:02X}, row 0 / column {column}.")
             print("The solver enumerates unknown fault rows/values and does not receive this mask.")
@@ -67,7 +68,7 @@ def aes_demo(terminal, limit, seed):
                     terminal.pause()
             terminal.pair(clean, faulty)
             attack_steps.emit(terminal, attack_steps.aes_piret(clean, faulty, column, survivors))
-            fresh = piret.key_candidates(clean, faulty, column)
+            fresh = piret_aes.key_candidates(clean, faulty, column)
             before = None if survivors is None else len(survivors)
             survivors = fresh if survivors is None else survivors & fresh
             print(f"Candidates in this pair: {len(fresh)}; intersection: {before} -> {len(survivors)}")
@@ -76,7 +77,7 @@ def aes_demo(terminal, limit, seed):
             if not survivors:
                 raise RuntimeError("AES candidate intersection is empty.")
             if len(survivors) == 1:
-                for position, value in zip(piret.output_positions(column), next(iter(survivors))):
+                for position, value in zip(piret_aes.output_positions(column), next(iter(survivors))):
                     last_key[position] = value
                 break
         else:
@@ -87,35 +88,35 @@ def aes_demo(terminal, limit, seed):
 
     recovered = show_aes_key_schedule(terminal, last_key)
     attack_steps.emit(terminal, attack_steps.verification("aes", plaintext, recovered, clean))
-    if recovered != key or piret.aes_target_encrypt(plaintext, recovered) != clean:
+    if recovered != key or piret_aes.aes_target_encrypt(plaintext, recovered) != clean:
         raise RuntimeError("AES key recovery verification failed.")
     print(terminal.paint(f"AES MASTER KEY: {recovered.hex().upper()} / PASS ({total} faulty outputs)", "32"))
     return True
 
 
 def inverse_rows():
-    """Compatibility adapter; the attack calculation lives in piret.py."""
-    return piret.inverse_rows()
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+    return piret_sm4.inverse_rows()
 
 
 def inverse_linear(value):
-    """Compatibility adapter; the attack calculation lives in piret.py."""
-    return piret.inverse_linear(value)
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+    return piret_sm4.inverse_linear(value)
 
 
 def sm4_encrypt(plaintext, key, byte=None, mask=0, fault_round=31):
-    """Terminal compatibility adapter; attack injection belongs to piret.py."""
-    return piret.sm4_fault_encrypt(plaintext, key, byte, mask, fault_round)
+    """Terminal compatibility adapter; attack injection belongs to piret_sm4.py."""
+    return piret_sm4.sm4_fault_encrypt(plaintext, key, byte, mask, fault_round)
 
 
 def sm4_byte_candidates(correct, faulty, byte, mask):
-    """Compatibility adapter; the attack calculation lives in piret.py."""
-    return piret.sm4_byte_candidates(correct, faulty, byte, mask)
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+    return piret_sm4.sm4_byte_candidates(correct, faulty, byte, mask)
 
 
 def reverse_sm4(final_keys, observer=None):
-    """Compatibility adapter; the attack calculation lives in piret.py."""
-    return piret.reverse_sm4(final_keys, observer)
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+    return piret_sm4.reverse_sm4(final_keys, observer)
 
 
 def show_sm4_peeling(terminal, ciphertext, target_round, recovered_keys):
@@ -128,7 +129,7 @@ def show_sm4_peeling(terminal, ciphertext, target_round, recovered_keys):
         substituted = sm4.sbox(value)
         diffused = sm4.linear(substituted)
         # The attack engine performs the actual reversal; this helper explains it.
-        view = piret.peel_sm4(ciphertext, number-1, recovered_keys)
+        view = piret_sm4.peel_sm4(ciphertext, number-1, recovered_keys)
         previous = struct.unpack(">4I", view)[-1]
         print(f"  Undo round {number} with recovered rk{number}={round_key:08X}")
         print(f"    A = {words[0]:08X} XOR {words[1]:08X} XOR {words[2]:08X} XOR {round_key:08X} = {value:08X}")
@@ -221,14 +222,14 @@ def sm4_demo(terminal, limit, start_byte=0):
     recovered_bytes = {}
 
     def oracle(number, byte, mask):
-        faulty, fault_trace = piret.sm4_fault_encrypt(plaintext, key, byte, mask, number)
+        faulty, fault_trace = piret_sm4.sm4_fault_encrypt(plaintext, key, byte, mask, number)
         attack_steps.emit(terminal, attack_steps.sm4_fault_trace(trace, fault_trace, number, byte, mask))
         return faulty
 
     def report(event):
         show_sm4_observation(terminal, event, recovered_bytes, start_byte)
 
-    result = piret.recover_sm4_master_key(correct, oracle, range(1, limit+1), start_byte, observer=report)
+    result = piret_sm4.recover_sm4_master_key(correct, oracle, range(1, limit+1), start_byte, observer=report)
     if not result['complete']:
         print("SM4 recovery remains ambiguous. Increase --observations.")
         return False

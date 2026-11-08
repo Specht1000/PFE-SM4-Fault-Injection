@@ -51,8 +51,8 @@ are required.
 
 Run these commands from the repository root.
 
-Every terminal execution of `aes.py`, `sm4.py`, `piret.py`, `giraud.py` or
-`run.py` also saves its output in `logs/<script>.txt` and `logs/<script>.html`.
+Every terminal execution of `aes.py`, `sm4.py`, `piret_aes.py`, `piret_sm4.py`,
+`giraud_aes.py`, `giraud_sm4.py`, `gui.py` or `run.py` also saves its output in `logs/<script>.txt` and `logs/<script>.html`.
 Each run replaces that program's previous logs instead of appending text or
 creating timestamped files. Old timestamped logs for that program are removed
 automatically. Logs from other programs are preserved. The first line prints
@@ -63,7 +63,12 @@ results. A plain text editor may show ANSI codes rather than colors; open the
 HTML file for the formatted version. Use `--color always` on attack commands to
 retain colors even when stdout is redirected. Standard errors and unexpected
 tracebacks are captured too. The
-`logs/` folder is ignored by Git. Imports and GUI execution do not create logs.
+`logs/` folder is ignored by Git. Imports do not create logs. A GUI session writes every built lesson, including all
+numerical steps and recovered keys, to `logs/gui.txt`; its colored HTML log is
+finalized when the window closes. Multiple lessons belong to the same session;
+relaunching the GUI replaces its previous session logs. The PDF builder and
+analysis entry point also save their output to `logs/build_pdf.txt` and
+`logs/analysis.txt`, with matching HTML files.
 
 **Terminal — AES + Piret, followed by SM4 + DFA:**
 
@@ -84,13 +89,14 @@ known to solver** for the stronger controlled-mask model. Use one of the masks
 The row/column fields select the first AES input byte; all sixteen bytes are
 processed. For SM4, row selects the first S-box byte and all four are processed.
 
-The candidate functions in `src/giraud.py` accept ciphertext observations and
-do not receive a secret key. Its optional `main()` runs a simple terminal
-simulation, independently of Tkinter. Visual reports and interface code stay
+The candidate functions in `src/giraud_aes.py` and `src/giraud_sm4.py` accept
+ciphertext observations and do not receive a secret key. Each module has its
+own terminal entry point, independently of Tkinter. Visual reports and interface code stay
 in `src/gui.py`. Ambiguous observations never produce a claimed recovered key.
 
 ```powershell
-python src/giraud.py
+python src/giraud_aes.py
+python src/giraud_sm4.py
 ```
 
 The terminal explains per-pair byte guesses, candidate intersections and complete
@@ -100,15 +106,14 @@ faults, rk27 through rk0 derived from the schedule, and the final FK removal.
 Unknown-bit mode displays all eight permitted errors; only `--known-bit` shares
 the exact simulator mask with the candidate solver. Add `--step` for pauses.
 
-Use `--algorithm aes` or `--algorithm sm4` to select one cipher, `--step` for
-pauses, and `--known-bit` to share the exact fault mask with the solver. The
-default executes both models with unknown-bit filtering. The terminal recovers
-the complete AES and SM4 master keys.
+Choose the AES or SM4 script above. Use `--step` for pauses and `--known-bit`
+to share the exact fault mask with the solver. Each script runs its own cipher
+with unknown-bit filtering by default and recovers its complete master key.
 
 The controlled-byte SM4 attack is also available directly:
 
 ```powershell
-python src/piret.py --algorithm sm4
+python src/piret_sm4.py
 ```
 
 This command explains each byte candidate, restores earlier round views with
@@ -128,7 +133,8 @@ the slider, the step selector or automatic playback.
 - `aes.py` and `sm4.py` implement normal encryption/decryption. Their block
   functions return bytes without printing or pausing; their `main()` functions
   show only normal input/output and round-trip verification.
-- `piret.py` and `giraud.py` inject faults through external observer functions
+- `piret_aes.py`, `piret_sm4.py`, `giraud_aes.py` and `giraud_sm4.py` inject
+  faults through external observer functions
   attached to the actual cipher execution. They do not run separate copies of
   AES/SM4. Candidate solvers use ciphertext observations rather than secret keys.
 - `gui.py` presents the actual execution traces, comparisons and explanations.
@@ -139,8 +145,10 @@ the slider, the step selector or automatic playback.
 ```powershell
 python src/aes.py
 python src/sm4.py
-python src/piret.py
-python src/giraud.py
+python src/piret_aes.py
+python src/piret_sm4.py
+python src/giraud_aes.py
+python src/giraud_sm4.py
 ```
 
 ### AES
@@ -150,7 +158,7 @@ a single-byte fault before **MixColumns in round 9**. Independent observations
 constrain one four-byte group of K10 at a time. Processing all four columns
 allows reconstruction of K10 and reversal of the AES-128 key schedule.
 
-The standalone `piret.py` terminal lesson also provides a **round-8 fault model**,
+The standalone `piret_aes.py` terminal lesson also provides a **round-8 fault model**,
 which propagates to all four groups. The recovery function uses ciphertext
 observations; the simulation key is used by the target and for final verification.
 Recovery stops only when the candidate groups are unique.
@@ -185,15 +193,19 @@ internal states and are not intended for production cryptographic use.
 src/
   aes.py                   Didactic AES-128 implementation
   sm4.py                   SM4 implementation and configurable example inputs
-  piret.py                 AES DFA helpers and terminal key-recovery lesson
-  giraud.py                AES single-bit Giraud attack and SM4 adaptation
+  piret_aes.py             AES DFA helpers and terminal key-recovery lesson
+  piret_sm4.py             Controlled SM4 DFA and full master-key recovery
+  giraud_aes.py            AES single-bit Giraud attack
+  giraud_sm4.py            SM4 single-bit adaptation and full key recovery
+  giraud_common.py         Shared mask validation and candidate intersections
+  giraud_terminal.py       Shared terminal presentation for Giraud lessons
+  attack_steps.py          Numerical teaching stages shared by terminal and GUI
   run.py                   Combined terminal demonstrations matching the notes
   gui.py                   Interactive AES / SM4 / DFA interface
 docs/
   AES_SM4_DFA.pdf           Encryption, fault models and recovery explanations
   AES_SM4_Scratch.pdf       Supporting project notes
   Piret_AES.pdf             Supporting AES DFA document
-  ONE_COMMAND_DFA.md        Terminal and GUI launch commands
 tests/
   test_combined_demo.py     PDF values, fault models and terminal highlighting
   test_crypto_lab.py        Cipher checks, GUI lessons and optional Tk tests

@@ -55,21 +55,21 @@ class CombinedTests(unittest.TestCase):
         rng = random.Random(9)
         for _ in range(4):
             key, block = (bytes(rng.randrange(256) for _ in range(16)) for _ in range(2))
-            correct = demo.piret.aes_target_encrypt(block, key)
+            correct = demo.piret_aes.aes_target_encrypt(block, key)
             recovered = bytearray(16)
             for column in range(4):
                 survivors = None
                 for mask in range(1, 9):
-                    faulty, _ = demo.piret.trace_round8(block, key, 2, column, mask, fault_round=9)
+                    faulty, _ = demo.piret_aes.trace_round8(block, key, 2, column, mask, fault_round=9)
                     self.assertEqual(sum(a != b for a, b in zip(correct, faulty)), 4)
-                    current = demo.piret.key_candidates(correct, faulty, column)
+                    current = demo.piret_aes.key_candidates(correct, faulty, column)
                     survivors = current if survivors is None else survivors & current
                     if len(survivors) == 1:
                         break
                 self.assertEqual(len(survivors), 1)
-                for position, byte in zip(demo.piret.output_positions(column), next(iter(survivors))):
+                for position, byte in zip(demo.piret_aes.output_positions(column), next(iter(survivors))):
                     recovered[position] = byte
-            self.assertEqual(demo.piret.reverse_key_schedule(recovered), key)
+            self.assertEqual(demo.piret_aes.reverse_key_schedule(recovered), key)
 
     def test_single_command_and_colors(self):
         output = io.StringIO()

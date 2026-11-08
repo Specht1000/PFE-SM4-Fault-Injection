@@ -18,8 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 import aes
 import sm4
-import piret
-import giraud
+import piret_aes
+import piret_sm4
+import giraud_aes
+import giraud_sm4
 
 
 def hd(a, b):
@@ -143,11 +145,11 @@ def attack_trial(cipher, model, key, pt):
         nonlocal oracle_ns
         start = time.perf_counter_ns()
         if cipher == 'SM4':
-            faulty = piret.sm4_fault_encrypt(pt, key, byte, mask, number)[0]
+            faulty = piret_sm4.sm4_fault_encrypt(pt, key, byte, mask, number)[0]
         elif model == 'Piret':
-            faulty = piret.encrypt_with_trace(pt, key, byte % 4, byte // 4, mask, number)[0]
+            faulty = piret_aes.encrypt_with_trace(pt, key, byte % 4, byte // 4, mask, number)[0]
         else:
-            faulty = giraud.aes_fault_encrypt(pt, key, byte, mask)[0]
+            faulty = giraud_aes.aes_fault_encrypt(pt, key, byte, mask)[0]
         oracle_ns += time.perf_counter_ns()-start
         queries.append(dict(round=number, byte=byte, mask=mask, correct=correct.hex(), faulty=faulty.hex(),
                             changed_bits=hd(correct, faulty), changed_bytes=sum(a != b for a,b in zip(correct,faulty))))
@@ -155,7 +157,7 @@ def attack_trial(cipher, model, key, pt):
 
     start = time.perf_counter_ns()
     if cipher == 'SM4':
-        solver = piret if model == 'Piret' else giraud
+        solver = piret_sm4 if model == 'Piret' else giraud_sm4
         options = {} if model == 'Piret' else dict(known_bit=model == 'Giraud-known')
         result = solver.recover_sm4_master_key(correct, oracle, **options)
         recovered = result['master_key']
@@ -167,15 +169,15 @@ def attack_trial(cipher, model, key, pt):
         def record(observation, column, before, fresh, survivors):
             history.append(dict(observation=observation, column=column, before=before,
                                 pair_candidates=fresh, remaining=len(survivors)))
-        last, _ = piret.recover_last_key(correct, outputs(), observer=record)
-        recovered = piret.reverse_key_schedule(last) if last is not None else None
+        last, _ = piret_aes.recover_last_key(correct, outputs(), observer=record)
+        recovered = piret_aes.reverse_key_schedule(last) if last is not None else None
     else:
         last, complete = bytearray(16), True
         for byte in range(16):
             survivors = set(range(256))
-            for observation, mask in enumerate(giraud.SINGLE_BITS, 1):
+            for observation, mask in enumerate(giraud_aes.SINGLE_BITS, 1):
                 faulty = oracle(10, byte, mask)
-                position, fresh = giraud.aes_candidates(correct, faulty, mask if model == 'Giraud-known' else None)
+                position, fresh = giraud_aes.aes_candidates(correct, faulty, mask if model == 'Giraud-known' else None)
                 before = len(survivors)
                 survivors &= fresh
                 history.append(dict(byte=byte, observation=observation, before=before,
@@ -186,7 +188,7 @@ def attack_trial(cipher, model, key, pt):
             if len(survivors) != 1:
                 complete = False
                 break
-        recovered = piret.reverse_key_schedule(bytes(last)) if complete else None
+        recovered = piret_aes.reverse_key_schedule(bytes(last)) if complete else None
     elapsed = time.perf_counter_ns()-start
     verified = recovered == key and encrypt(pt, recovered) == correct
     return dict(cipher=cipher, model=model, verified=verified, faults=len(queries),
@@ -210,7 +212,7 @@ def main():
     report = dict(generated_utc=datetime.now(timezone.utc).isoformat(), configuration=vars(args),
                   environment=dict(python=sys.version, platform=platform.platform(), processor=platform.processor()),
                   source_sha256={name: hashlib.sha256((ROOT/'src'/name).read_bytes()).hexdigest()
-                                 for name in ('aes.py','sm4.py','piret.py','giraud.py')}, ciphers={}, attacks=[])
+                                 for name in ('aes.py','sm4.py','piret_aes.py','piret_sm4.py','giraud_aes.py','giraud_sm4.py','giraud_common.py','giraud_terminal.py')}, ciphers={}, attacks=[])
     rows = []
     for name, enc, dec, box in [('AES-128', aes.aes_encrypt, aes.aes_decrypt, aes.SBOX),
                                 ('SM4', sm4.sm4_encrypt_block, sm4.sm4_decrypt_block, sm4.SBOX)]:
@@ -277,9 +279,10 @@ def write_report(report, out):
               '## Referências primárias', '',
               '- [NIST FIPS 197 — AES](https://doi.org/10.6028/NIST.FIPS.197-upd1)',
               '- [RFC 8998 — uso de SM4](https://www.rfc-editor.org/rfc/rfc8998.html)',
-              '- Modelos e equações executados: `src/piret.py` e `src/giraud.py`; documentação local em `docs/`.', '']
+              '- Modelos e equações executados: `src/piret_aes.py`, `src/piret_sm4.py`, `src/giraud_aes.py` e `src/giraud_sm4.py`; documentação local em `docs/`.', '']
     (out/'report.md').write_text('\n'.join(lines), encoding='utf-8')
 
 
 if __name__ == '__main__':
-    main()
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "analysis"))

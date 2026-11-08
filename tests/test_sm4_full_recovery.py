@@ -10,25 +10,27 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import sm4
-import piret
-import giraud
+import piret_aes
+import piret_sm4
+import giraud_aes
+import giraud_sm4
 
 
 class FullSM4Tests(unittest.TestCase):
     def test_random_keys_without_reference_schedule_access(self):
         rng = random.Random(128)
-        masks = set(range(1, 9)) | set(giraud.SINGLE_BITS)
+        masks = set(range(1, 9)) | set(giraud_aes.SINGLE_BITS)
         for _ in range(8):
             key, plaintext = (bytes(rng.randrange(256) for _ in range(16)) for _ in range(2))
             correct = sm4.sm4_encrypt_block(plaintext, key)
             truth = sm4.key_expansion(key)
             # Prepare an opaque oracle: the solver sees output bytes only.
-            outputs = {(r,b,m): piret.sm4_fault_encrypt(plaintext,key,b,m,r)[0] for r in range(28,32) for b in range(4) for m in masks}
+            outputs = {(r,b,m): piret_sm4.sm4_fault_encrypt(plaintext,key,b,m,r)[0] for r in range(28,32) for b in range(4) for m in masks}
 
             def oracle(number, byte, mask):
                 return outputs[number, byte, mask]
 
-            for attack, options in [(piret, {}), (giraud, {}), (giraud, dict(known_bit=True))]:
+            for attack, options in [(piret_sm4, {}), (giraud_sm4, {}), (giraud_sm4, dict(known_bit=True))]:
                 with patch.object(sm4, "key_expansion", side_effect=AssertionError("Solver must not read a reference schedule")):
                     result = attack.recover_sm4_master_key(correct, oracle, **options)
                 self.assertTrue(result['complete'])
@@ -53,9 +55,9 @@ class FullSM4Tests(unittest.TestCase):
         truth = sm4.key_expansion(key)
         for number in range(28,32):
             later = {r: truth[r] for r in range(number+1,32)}
-            self.assertEqual(piret.peel_sm4(ciphertext,number,later),states[number])
+            self.assertEqual(piret_sm4.peel_sm4(ciphertext,number,later),states[number])
         with self.assertRaises(ValueError):
-            piret.peel_sm4(ciphertext,28,{})
+            piret_sm4.peel_sm4(ciphertext,28,{})
 
     def test_ambiguity_stops_before_using_an_unknown_subkey(self):
         key = bytes.fromhex(sm4.KEY)
@@ -64,18 +66,18 @@ class FullSM4Tests(unittest.TestCase):
 
         def oracle(number, byte, mask):
             queries.append(number)
-            return piret.sm4_fault_encrypt(key,key,byte,mask,number)[0]
+            return piret_sm4.sm4_fault_encrypt(key,key,byte,mask,number)[0]
 
-        result = piret.recover_sm4_master_key(correct,oracle,masks=(1,))
+        result = piret_sm4.recover_sm4_master_key(correct,oracle,masks=(1,))
         self.assertFalse(result['complete'])
         self.assertIsNone(result['master_key'])
         self.assertEqual(result['round_keys'],{})
         self.assertEqual(set(queries),{31})
         with self.assertRaises(ValueError):
-            piret.recover_sm4_master_key(correct,lambda r,b,m: correct)
+            piret_sm4.recover_sm4_master_key(correct,lambda r,b,m: correct)
 
     def test_terminal_entry_points(self):
-        for entry, arguments in [(piret.main, ['--algorithm','sm4','--color','never']), (giraud.main,['--algorithm','sm4','--color','never'])]:
+        for entry, arguments in [(piret_sm4.main, ['--algorithm','sm4','--color','never']), (giraud_sm4.main,['--algorithm','sm4','--color','never'])]:
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(entry(arguments),0)
@@ -85,7 +87,7 @@ class FullSM4Tests(unittest.TestCase):
         import re
         output = io.StringIO()
         with redirect_stdout(output):
-            self.assertEqual(piret.main(['--algorithm', 'sm4', '--color', 'never']), 0)
+            self.assertEqual(piret_sm4.main(['--algorithm', 'sm4', '--color', 'never']), 0)
         text = output.getvalue()
         truth = sm4.key_expansion(bytes.fromhex(sm4.KEY))
         derived = {int(index): int(value, 16) for index, value in re.findall(r'DERIVED rk(\d+) = ([0-9A-F]{8})', text)}

@@ -7,8 +7,10 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import aes
 import sm4
-import piret
-import giraud
+import piret_aes
+import piret_sm4
+import giraud_aes
+import giraud_sm4
 import gui
 import attack_steps
 
@@ -19,12 +21,12 @@ class DetailedAttackTests(unittest.TestCase):
         correct = aes.aes_encrypt(plaintext, key)
         previous = None
         for mask in (1, 2):
-            faulty = piret.encrypt_with_trace(plaintext, key, mask=mask, fault_round=9)[0]
+            faulty = piret_aes.encrypt_with_trace(plaintext, key, mask=mask, fault_round=9)[0]
             events = list(attack_steps.aes_piret(correct, faulty, 0, previous))
             text = '\n'.join(event['detail'] for event in events)
             self.assertEqual(len(re.findall(r'^k=[0-9A-F]{2}:', text, re.M)), 1024)
             self.assertEqual(len(re.findall(r'^e=[0-9A-F]{2};', text, re.M)), 1020)
-            fresh = piret.key_candidates(correct, faulty, 0)
+            fresh = piret_aes.key_candidates(correct, faulty, 0)
             previous = fresh if previous is None else previous & fresh
             final = events[-1]['detail'].split(f'Intersection: {len(previous)} tuples\n')[1]
             for candidate in previous:
@@ -34,8 +36,8 @@ class DetailedAttackTests(unittest.TestCase):
     def test_giraud_reports_rejections_and_acceptances(self):
         key, plaintext = bytes.fromhex(aes.KEY), bytes.fromhex(aes.PLAINTEXT)
         correct = aes.aes_encrypt(plaintext, key)
-        faulty = giraud.aes_fault_encrypt(plaintext, key, 5, 4)[0]
-        position, expected = giraud.aes_candidates(correct, faulty)
+        faulty = giraud_aes.aes_fault_encrypt(plaintext, key, 5, 4)[0]
+        position, expected = giraud_aes.aes_candidates(correct, faulty)
         events = list(attack_steps.aes_giraud(correct, faulty, position))
         text = events[0]['detail']
         self.assertEqual(len(re.findall(r'^k=', text, re.M)), 256)
@@ -54,8 +56,8 @@ class DetailedAttackTests(unittest.TestCase):
                 self.assertEqual(len(re.findall(r'^bit ', events[-3]['detail'], re.M)), 32)
                 previous[identity] = set(event['survivors'])
             def oracle(number, byte, mask):
-                return piret.sm4_fault_encrypt(key, key, byte, mask, number)[0]
-            result = giraud.recover_sm4_master_key(correct, oracle, known_bit=known_bit, observer=observe)
+                return piret_sm4.sm4_fault_encrypt(key, key, byte, mask, number)[0]
+            result = giraud_sm4.recover_sm4_master_key(correct, oracle, known_bit=known_bit, observer=observe)
             self.assertEqual(result['master_key'], key)
 
     def test_gui_exposes_every_reversed_word_and_verification(self):

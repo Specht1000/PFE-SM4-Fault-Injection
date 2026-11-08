@@ -52,7 +52,7 @@ Configuração: {'samples': 1024, 'avalanche_trials': 4, 'attack_trials': 10, 's
 
 - [NIST FIPS 197 — AES](https://doi.org/10.6028/NIST.FIPS.197-upd1)
 - [RFC 8998 — uso de SM4](https://www.rfc-editor.org/rfc/rfc8998.html)
-- Modelos e equações executados: `src/piret.py` e `src/giraud.py`; documentação local em `docs/`.
+- Modelos e equações executados: `src/piret_aes.py`, `src/piret_sm4.py`, `src/giraud_aes.py` e `src/giraud_sm4.py`; documentação local em `docs/`.
 
 <!-- generated-plots -->
 
