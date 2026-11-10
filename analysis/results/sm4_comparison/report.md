@@ -81,6 +81,10 @@ The three known-mask variants all use 32 faulty outputs in these trials: 16 targ
 
 **Connection between the figures.** More initial hypotheses in Figure 3 explain why unknown-bit Giraud needs extra observations in Figure 1 and a larger per-byte budget in Figure 2. The matched-bit known-mask variants have identical histories, so these graphs support equivalence under matched assumptions rather than an intrinsic advantage attached to an attack name.
 
+## Subkey and master-key recovery
+
+See the [extended recovery analysis](key_recovery_report.md) and [recovery charts PDF](key_recovery.pdf) for per-subkey costs, byte-level costs, cumulative milestones, partial recovery under limited budgets, and verification of the master key and all 32 regenerated subkeys.
+
 ## Practical example: first byte of rk31
 
 For plaintext and key `0123456789ABCDEFFEDCBA9876543210`, a round-31 byte-0 fault with mask `01` yields inverse-L byte difference `4F` and known byte q=`07`.

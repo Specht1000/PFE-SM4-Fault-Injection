@@ -145,6 +145,18 @@ on identical single-bit observations. Unknown-bit filtering is evaluated
 separately. Timings measure offline host recovery with cached target outputs;
 they exclude physical acquisition and target encryption.
 
+The same command also exports `key_recovery_report.md`, `key_recovery.pdf`,
+per-subkey CSV data and four additional figures covering byte costs, subkey
+milestones, partial recovery and full master-key/schedule verification.
+To regenerate these recovery analyses from saved measurements:
+
+```powershell
+python analysis/analyze_sm4_recovery.py
+```
+
+This standalone command writes `logs/analyze_sm4_recovery.txt` and its colored
+HTML counterpart without repeating the timing experiments.
+
 ### Code responsibilities
 
 - `aes.py` and `sm4.py` implement normal encryption/decryption. Their block

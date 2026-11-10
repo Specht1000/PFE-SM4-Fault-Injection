@@ -1,0 +1,198 @@
+\chapter{Causing Single-Bit Faults in Practice}
+\label{chap:physical_faults}
+
+The attacks in this report assume a very specific event: a short, transient fault
+that changes one bit (Giraud) or one byte (Piret) of an intermediate value, at a
+chosen instruction, while leaving everything else correct. The mathematics then
+turns the correct/faulty ciphertext pair into key information. This chapter
+explains, at the level of a laboratory evaluation, how such faults are produced
+on real hardware, how far the clean single-bit model is from typical practice,
+and which countermeasures remove the attacker's advantage. It is written for a
+defensive security evaluation on the project's own ChipWhisperer target; it is
+not a procedure against any third-party device.
+
+\section{Why a physical fault appears}
+Digital logic is correct only when every signal settles within one clock period
+and every transistor is powered within its specified range. A fault-injection
+technique deliberately violates one of these guarantees for a very short time, so
+that a flip-flop latches a value that has not finished computing, or a memory
+cell flips. Because the violation is brief and localised, most of the
+computation stays correct and only a few bits are disturbed --- which is exactly
+what differential fault analysis needs.
+
+\section{Common injection techniques}
+\begin{description}
+\item[Clock glitching.] When the attacker controls the device clock, inserting
+one abnormally short clock period forces a register to sample before the slowest
+combinational path has settled. The bits on the slow paths latch incorrectly.
+It is highly repeatable and is the method most able to approach a one- or
+few-bit fault, but it only applies to targets that run from an external,
+attacker-supplied clock. This is the mechanism exercised on the project's STM32
+target.
+\item[Voltage glitching.] A brief, sharp drop (or spike) on the supply rail slows
+gate switching so that, again, logic fails to settle in time. It needs no clock
+access and little equipment --- a transistor pulling the rail low (a ``crowbar'')
+is enough --- which makes it one of the most widely used techniques. Its spatial
+and bit-level precision is lower than clock glitching.
+\item[Electromagnetic (EM) pulse injection.] A small coil held over the package
+emits a fast magnetic pulse that induces transient currents in nearby logic. It
+is contactless, needs no decapsulation, and can be aimed at a region of the die,
+giving some spatial selectivity.
+\item[Optical / laser injection.] A focused light or laser pulse on an exposed
+(decapsulated) die deposits charge in specific cells. It is the most precise
+technique and can come closest to a true, chosen single-bit fault, but it is
+invasive and requires expensive equipment and sample preparation.
+\item[Auxiliary stressors.] Temperature and body-biasing shift timing margins and
+are sometimes combined with the above to widen the window in which a glitch
+succeeds.
+\end{description}
+
+\section{Hitting the right instruction}
+Producing a disturbance is only half the problem; it must land on the targeted
+operation (for Giraud, the byte just before the final SubBytes). Two controls do
+this:
+\begin{itemize}
+\item A \textbf{trigger} marks when the sensitive computation runs. In this
+project the firmware raises a GPIO line (TIO4) around the cipher, and the capture
+hardware watches it. A real evaluation may instead trigger on a power or EM
+feature.
+\item A \textbf{delay} after the trigger selects \emph{which} clock cycle, and
+therefore which instruction, receives the glitch; the glitch \emph{width} and
+\emph{offset} set its strength. An evaluation sweeps these parameters, repeats
+each setting many times, and classifies the outcome.
+\end{itemize}
+
+\section{The gap between the model and reality}
+A real campaign does not produce clean single-bit faults on demand. Each attempt
+typically falls into one of several outcomes:
+\begin{center}
+\begin{tabular}{ll}\toprule
+Observed outcome & Use for DFA \\\midrule
+No effect (correct output) & none \\
+Reset or crash & none \\
+Instruction skip / control-flow change & different attack class \\
+Multi-bit or multi-byte fault & usually breaks the single-fault model \\
+Clean one-bit / one-byte transient fault & \emph{this} is what Giraud/Piret need \\\bottomrule
+\end{tabular}
+\end{center}
+\noindent The clean case is often a minority of attempts. The practical workflow
+is therefore statistical: log the correct ciphertext and every faulty ciphertext
+with its glitch parameters, \emph{filter} for the faults whose difference matches
+the assumed model, and feed only those to the solver. This is why the software
+experiments in this report separate the target (which may expose internal state)
+from the solver (which sees only ciphertexts): the solver is written to accept
+exactly the observations a real, filtered campaign would yield.
+
+\note{The numerical examples elsewhere in this report inject an exact XOR in
+software, so the fault model holds by construction. On the physical STM32 target
+the same model must be \emph{established experimentally}: knowledge of the exact
+bit (the \texttt{Giraud-known} variant) is a strong assumption that a campaign has
+to justify by characterising its own glitches.}
+
+\section{A taxonomy of fault widths and their consequences}
+\label{sec:fault_taxonomy}
+A disturbed computation can land anywhere on a spectrum, from no effect to a
+corrupted whole word. What decides whether Giraud or Piret can use it is, above
+all, the \emph{width} of the fault --- how many bits or bytes actually changed.
+The two attacks are defined by the width they expect:
+\begin{itemize}
+\item \textbf{Giraud} expects \emph{exactly one bit} flipped at the input of the
+last S-box layer.
+\item \textbf{Piret} expects \emph{exactly one byte} corrupted (any nonzero
+value) before the round-9 MixColumns.
+\end{itemize}
+
+\paragraph{Consequence by fault width.}
+This is the dimension that decides whether an attack \emph{works} or \emph{breaks}.
+\begin{center}
+\begin{tabular}{P{.26\linewidth}P{.33\linewidth}P{.33\linewidth}}\toprule
+Fault width & Giraud (model: 1 bit) & Piret (model: 1 byte) \\\midrule
+Zero bits (no effect) & \(C=C'\), useless & \(C=C'\), useless \\
+One bit & \emph{ideal} & works --- one bit is a byte of Hamming weight one \\
+2--8 bits in the \textbf{same} byte & breaks: input difference has weight \(>1\), the weight-one filter rejects the true key & \emph{ideal} --- this is exactly a single-byte fault \\
+One whole byte & breaks (same reason) & \emph{ideal} \\
+\(\ge 2\) different state bytes & breaks the single-fault model & breaks: pattern no longer matches one byte in a column \\\bottomrule
+\end{tabular}
+\end{center}
+\noindent The central observation is that \textbf{Piret is a superset of Giraud}:
+every one-bit fault is also a one-byte fault (a byte value of Hamming weight one),
+so the Piret solver accepts a bit, whereas Giraud demands weight one and rejects
+anything wider. This is why, on SM4, the two attacks nearly coincide --- the only
+difference is that Giraud assumes \(e\) is a single bit while Piret accepts the
+whole byte.
+
+\paragraph{Consequence by fault position (unknown location).}
+Not knowing \emph{where} the fault landed does \emph{not} break the attack; it is
+recovered by observation and raises the cost.
+\begin{center}
+\begin{tabular}{P{.3\linewidth}P{.36\linewidth}P{.26\linewidth}}\toprule
+Situation & How it is resolved & Consequence \\\midrule
+Unknown which column / key group & the set of changed ciphertext positions is the signature (see the column\(\to\)positions table of the Piret chapter) & none --- the group is \emph{read} from \(C\xor C'\) \\
+Unknown exact position within the group & the solver sweeps all rows: \(\mathcal D=\{M(e\,\mathbf e_r):r\in\{0,1,2,3\},\,e\in\{1,\ldots,255\}\}\) & weaker filter \(\Rightarrow\) more faults \\\bottomrule
+\end{tabular}
+\end{center}
+\noindent For AES Giraud this is even more direct: a one-bit fault changes exactly
+one ciphertext byte (no MixColumns in the last round), so the changed position
+already names the attacked key byte.
+
+\paragraph{Consequence by fault value (unknown pattern).}
+Not knowing the exact value does not break the attack either; it only weakens the
+filter.
+\begin{center}
+\begin{tabular}{P{.16\linewidth}P{.3\linewidth}P{.28\linewidth}P{.16\linewidth}}\toprule
+Attack & Value known & Value unknown & Measured \\\midrule
+Giraud & knows which bit flipped: tests \textbf{1} value of \(e\) & only ``some bit'' (weight 1): tests \textbf{8} values (\hex{01},\ldots,\hex{80}) & \(32\to{\approx}34.6\) \\
+Piret & \multicolumn{2}{P{.58\linewidth}}{already assumes any value --- sweeps \(e\in\{1,\ldots,255\}\) by construction} & unchanged \\\bottomrule
+\end{tabular}
+\end{center}
+\noindent Because Piret already treats the value as unknown, it has no
+known/unknown \emph{value} variant --- only the \emph{position} can be known or not.
+
+\paragraph{Consequence by timing (wrong round or instruction).}
+If the glitch lands on the wrong round or instruction, the difference propagates
+through a different number of S-box layers and the pattern of changed bytes no
+longer matches the expected one:
+\begin{itemize}
+\item Too early $\Rightarrow$ extra S-box layers scramble the difference $\Rightarrow$ matches no pattern $\Rightarrow$ filtered out.
+\item Too late (e.g.\ already at the output) $\Rightarrow$ wrong positions change $\Rightarrow$ filtered out.
+\end{itemize}
+The delay sweep of \S\ref{sec:fault_taxonomy}'s sibling section exists precisely
+to place the glitch on the right cycle.
+
+\paragraph{Summary.}
+\begin{center}
+\begin{tabular}{P{.32\linewidth}P{.17\linewidth}P{.15\linewidth}P{.2\linewidth}}\toprule
+What you do not know / what happened & Giraud & Piret & Action \\\midrule
+No effect & useless & useless & discard \\
+One bit, bit known & \checkmark\ 32 faults & \checkmark\ works & solve \\
+One bit, bit unknown & \checkmark\ \({\approx}34.6\) & \checkmark\ works & sweep \(e\) \\
+Several bits, same byte & breaks & \checkmark\ ideal & Piret solver \\
+One byte, pos.\ unknown & n/a & \checkmark\ more faults & read group, sweep \(r\) \\
+Several bytes & breaks & breaks & discard \\
+Wrong round / instr. & no match & no match & retune delay \\\bottomrule
+\end{tabular}
+\end{center}
+\noindent The rule that ties it together: the less you know (value, position), the
+\emph{weaker the filter} and the \emph{more faults} you need --- but the attack
+stays valid. What actually \emph{breaks} an attack is the width leaving the model:
+more than one byte breaks both, while more than one bit breaks only Giraud (Piret
+still holds).
+
+\section{Countermeasures}
+Because the attacks depend on obtaining a clean faulty ciphertext that matches a
+known model, the defences aim to deny exactly that:
+\begin{description}
+\item[Redundancy and verification.] Compute the cipher twice, or decrypt the
+result and compare; release the output only if both agree. A single transient
+fault is then detected and suppressed.
+\item[Infection.] If a difference is detected, scramble the output so the faulty
+ciphertext carries no usable single-byte relationship instead of the clean
+difference the solver needs.
+\item[Sensors and detectors.] Clock, voltage, EM and light sensors reset the
+device when an injection is attempted.
+\item[Randomisation.] Masking and random timing make it harder to aim a fault at
+a specific intermediate value and to interpret the resulting difference.
+\end{description}
+\noindent None of these is implemented in this project's deliberately
+unprotected educational target; their absence is what makes the target suitable
+for measuring the attacks in the first place.

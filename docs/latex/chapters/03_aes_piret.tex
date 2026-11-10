@@ -27,6 +27,37 @@ This produces \(4\cdot255=1020\) four-byte difference patterns (not 1020 individ
 A single correct/faulty pair typically leaves multiple candidate key quartets. Repeat with independent faults in the same column and intersect the candidate sets:
 \[\mathcal K_{\mathrm{surviving}}=\mathcal K_1\cap\mathcal K_2\cap\cdots.\]
 Repeat across all four columns to recover the full 16-byte \(K_{10}\). The notes illustrate candidate filtering using a hypothetical quartet \((\hex{13},\hex{2B},\hex{A7},\hex{17})\); such pedagogical candidate examples should not be confused with a complete independently verified AES fault trace.
+\section{Two injection depths: round 9 versus round 8}
+\label{sec:piret_two_models}
+The same Piret principle can be applied at two different depths, and the project's
+analysis distinguishes them because they behave very differently. The choice is
+the \texttt{fault\_round} argument of the target in \texttt{piret\_aes.py}.
+
+\begin{description}
+\item[Round-9 model (one column group).] The fault is injected before the
+round-9 MixColumns, as described above. MixColumns spreads the single faulted
+byte over \emph{one} column (four bytes); ShiftRows then scatters those four
+bytes to four ciphertext positions. One faulty ciphertext therefore constrains
+only \emph{one} group of four last-round key bytes. To recover all sixteen bytes
+of \(K_{10}\), the campaign must be repeated for each of the four columns.
+\item[Round-8 model (all four groups at once).] The fault is injected one round
+earlier, before the round-8 MixColumns. Now the difference passes through
+\emph{two} MixColumns layers: round-8 MixColumns spreads the single byte to a
+full column, and round-9 MixColumns spreads each of those bytes across all four
+columns. Before the final round the difference already touches all sixteen state
+bytes, so a single faulty ciphertext constrains \emph{all four} key-byte groups
+simultaneously. This is why the measured campaigns recover the complete
+last-round key from a median of only two faulty ciphertexts.
+\end{description}
+
+\noindent The trade-off is depth versus count: the round-8 model needs far fewer
+faulty ciphertexts but assumes a cleaner, more deeply propagated fault and larger
+per-observation candidate structures; the round-9 model is simpler to reason
+about per column but must be repeated. The default command line and the analysis
+use the round-8 model; \texttt{run.py} follows the round-9 model used in the
+lecture notes. Both reduce to the same last-round key once enough observations
+are intersected.
+
 \section{Reversing AES-128 key expansion}
 Let \(w_0,\ldots,w_{43}\) be 32-bit expanded-key words. For \(i\ge4\),
 \[w_i=\begin{cases}w_{i-4}\xor g(w_{i-1}),&i\equiv0\pmod4,\\w_{i-4}\xor w_{i-1},&\text{otherwise},\end{cases}\]

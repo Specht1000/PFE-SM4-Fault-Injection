@@ -58,6 +58,48 @@ K_{10}=\hex{13111D7F\allowbreak{}E3944A17\allowbreak{}F307A78B\allowbreak{}4D2B3
 \end{equation}
 The AES-128 key schedule can then be reversed to recover the original key $K_0$, as explained in the preceding AES key-expansion chapter.
 
+\section{Two variants: known-bit and unknown-bit faults}
+\label{sec:giraud_known_unknown}
+The project's analysis runs Giraud in two modes, and the difference is exactly
+how much the attacker knows about the injected fault. It changes the filter in
+equation~\eqref{eq:giraud_aes_test}, not the location of the fault.
+
+\begin{description}
+\item[Unknown-bit (\texttt{Giraud-unknown}).] The attacker knows only that
+\emph{some} single bit was flipped. A key candidate survives when
+\(\delta(k)\) has Hamming weight one, i.e.\ \(\delta(k)\in\mathcal E\), a set of
+\emph{eight} allowed values. This is the weaker filter, so more faulty
+ciphertexts are needed before the intersection collapses to one byte.
+\item[Known-bit (\texttt{Giraud-known}).] The exact mask \(e\) is known (for
+example because the simulation controls it, or a physical campaign has been
+characterised). The condition tightens to a \emph{single} allowed value,
+\(\delta(k)=e\). This is the strongest filter and converges fastest.
+\end{description}
+
+\noindent Both variants recover the full key; they differ in how many
+observations that takes. In the project's measured campaigns (ten random keys
+each, one byte per observation), the medians were:
+
+\begin{center}
+\begin{tabular}{llcc}\toprule
+Cipher & Variant & Verified recoveries & Faulty ciphertexts (median [min--max]) \\\midrule
+AES-128 & Giraud-known   & 10/10 & 32 \,[32--32] \\
+AES-128 & Giraud-unknown & 10/10 & 34.5 \,[32--37] \\
+SM4     & Giraud-known   & 10/10 & 32 \,[32--32] \\
+SM4     & Giraud-unknown & 10/10 & 34.6 \,[32--38] \\\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The known-bit variant settles at the structural minimum of thirty-two
+faults (two one-bit faults on each of the sixteen targeted bytes for AES, and the
+analogous count for SM4), while the unknown-bit variant occasionally needs a few
+extra faults because the eight-value filter leaves more candidates to eliminate.
+Contrast this with Piret in the round-8 model, which recovers the whole AES
+last-round key from a median of only two faulty ciphertexts
+(Section~\ref{sec:piret_two_models}): Piret pays with a more diffused fault and
+heavier per-observation algebra, whereas Giraud uses the simplest possible fault
+(one bit, last round) but needs many of them.
+
 \section{Adaptation of the single-bit idea to SM4}
 \label{sec:giraud_sm4}
 The corresponding SM4 experiment is an \emph{adaptation of the single-bit differential filtering principle}, rather than a claim that the original AES attack transfers unchanged. The SM4 last round is

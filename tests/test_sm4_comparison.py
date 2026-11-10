@@ -1,5 +1,6 @@
 """Validate paired comparison controls and early-stop budget reconstruction."""
 import importlib.util
+import copy
 from pathlib import Path
 import sys
 import unittest
@@ -45,6 +46,28 @@ class SM4ComparisonTests(unittest.TestCase):
         self.assertTrue(piret["complete"])
         self.assertEqual(piret["master_key"], self.key)
         self.assertEqual(piret["history"], giraud["history"])
+
+    def test_subkeys_are_extracted_and_corruption_is_rejected(self):
+        sys.path.insert(0, str(ROOT / "analysis"))
+        from analyze_sm4_recovery import extract_trial
+        result = comparison.recover("Piret-default", self.correct, self.outputs)
+        trial = dict(trial=0, simulation_key=self.key.hex(), plaintext=self.key.hex(), correct=self.correct.hex(), models={"Piret-default": result})
+        recovered = extract_trial(trial, "Piret-default")
+        self.assertEqual(recovered["master_key"], self.key.hex().upper())
+        self.assertEqual(recovered["matching_schedule_words"], 32)
+        self.assertEqual(len(recovered["stages"]), 4)
+        self.assertEqual(recovered["stages"][-1]["cumulative_queries"], result["used"])
+
+        # A forged singleton must be caught by independent schedule verification.
+        corrupted = copy.deepcopy(trial)
+
+        for event in corrupted["models"]["Piret-default"]["history"]:
+            if event["remaining"] == 1:
+                event["survivors"][0] ^= 1
+                break
+
+        with self.assertRaises(ValueError):
+            extract_trial(corrupted, "Piret-default")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,90 @@
 \chapter{AES versus SM4: Key Lessons}
 \begin{center}\begin{tabular}{P{.35\linewidth}P{.28\linewidth}P{.28\linewidth}}\toprule Property&AES-128&SM4\\\midrule Block size&128 bits&128 bits\\Key size&128 bits&128 bits\\Rounds&10&32\\State&4$\times$4 byte matrix&Four 32-bit words\\Nonlinearity&AES S-box&SM4 S-box\\Linear diffusion&MixColumns and ShiftRows&Rotations and XOR in \(L\)\\Last-round target&\(K_{10}\), 128 bits&\(rk_{31}\), 32 bits\\Master-key recovery&Reverse AES expansion&Reverse SM4 expansion from four consecutive round keys\\\bottomrule\end{tabular}\end{center}
+\section{The same attack on AES and on SM4?}
+\label{sec:aes_vs_sm4_attacks}
+The \emph{principle} of each attack carries over to SM4 --- inject a fault before
+a non-linear S-box layer, read it out through the (invertible) linear layer, and
+filter key candidates with an S-box differential --- but the \emph{structure}
+differs enough that SM4 is not simply a copy of the AES case.
+
+\paragraph{Piret: AES versus SM4.}
+\begin{center}\begin{tabular}{P{.26\linewidth}P{.32\linewidth}P{.32\linewidth}}\toprule
+ & AES-128 Piret & SM4 Piret \\\midrule
+Fault & one byte before a MixColumns & one byte at an S-box input \\
+Linear layer exploited & MixColumns (mixes 4 bytes of a column) & \(L\) (mixes the 4 bytes of a 32-bit word) \\
+How it is solved & match the MixColumns differential over a 4-byte key group & invert \(L\), then solve the S-box differential byte by byte \\
+Faults needed (median) & \(\approx 2\) (round-8 model) & \(\approx 32\) \\
+Recovered per campaign & all of \(K_{10}\) (128 bits) & one subkey \(rk_i\) (32 bits) \\\bottomrule
+\end{tabular}\end{center}
+
+\paragraph{Giraud: AES versus SM4.}
+\begin{center}\begin{tabular}{P{.26\linewidth}P{.32\linewidth}P{.32\linewidth}}\toprule
+ & AES-128 Giraud & SM4 Giraud \\\midrule
+Fault & one bit before final SubBytes & one bit at an S-box input \\
+Last-round linear layer & \textbf{none} (AES last round has no MixColumns) & \(L\) is still present \\
+Output effect & exactly one ciphertext byte changes & a full 32-bit word changes \\
+How it is solved & filter directly by Hamming weight one & invert \(L\) first, then filter by Hamming weight one \\
+Faults needed (median) & 32 (known) / \(\approx 34.5\) (unknown) & 32 (known) / \(\approx 34.6\) (unknown) \\\bottomrule
+\end{tabular}\end{center}
+
+\paragraph{The key point.}
+On \emph{AES}, Piret and Giraud are genuinely different: different round, byte
+fault versus bit fault, and two faulty ciphertexts versus thirty-two. On
+\emph{SM4} they move much closer together, which is probably why they can look
+like ``the same thing''. The reason is structural: SM4 applies its linear layer
+\(L\) in \emph{every} round, including the last, so both SM4 attacks must first
+invert \(L\) and then solve the same S-box differential. What is left to
+distinguish them is only the fault they assume --- a known whole-byte XOR for the
+Piret model, or a single bit (known or unknown) for Giraud. In other words, on
+SM4 the two attacks share one skeleton and differ only in the fault model, while
+on AES the absence of MixColumns in the last round gives Giraud a shortcut that
+Piret does not have.
+
+\section{On SM4, what actually differs between Piret and Giraud?}
+\label{sec:sm4_piret_vs_giraud}
+Because SM4 keeps its linear layer \(L\) in every round, both attacks run the
+\emph{same five steps}. Given a correct ciphertext and a faulty one for the same
+input:
+\begin{enumerate}
+\item Inject the fault at an \textbf{S-box input} of the last round.
+\item Invert the linear layer: \(\Delta B=L^{-1}(\Delta X_{35})=\tau(A)\xor\tau(A')\).
+\item Solve the S-box differential byte by byte: keep the inputs \(a\) with
+\(S_{\mathrm{SM4}}(a)\xor S_{\mathrm{SM4}}(a\xor e)=d\).
+\item Convert the surviving \(a\) into bytes of the round key \(rk_{31}\).
+\item Repeat for rounds 30, 29 and 28, then invert the key schedule.
+\end{enumerate}
+The implementation makes this literal: \texttt{giraud\_sm4.py} reuses the target
+and the \(L^{-1}\) routine of \texttt{piret\_sm4.py}. The \emph{only} thing that
+changes is the fault assumed in step~1, which in turn sets the value of \(e\)
+used in step~3:
+
+\begin{center}\begin{tabular}{P{.26\linewidth}P{.3\linewidth}P{.3\linewidth}}\toprule
+ & SM4 Piret & SM4 Giraud \\\midrule
+Fault injected & one \textbf{whole byte}, value known & one \textbf{single bit} \\
+Mask \(e\) in \(S(a)\xor S(a\xor e)=d\) & a known byte, \hex{01}--\hex{FF} & a one-bit mask (\hex{01},\hex{02},\ldots,\hex{80}), known or not \\
+Everything else (steps 2--5) & identical & identical \\\bottomrule
+\end{tabular}\end{center}
+
+\noindent The measured faulty-ciphertext counts confirm it: SM4 Piret and SM4
+Giraud-known both need a median of \textbf{32} faults --- the same procedure, the
+same cost --- driven by SM4's structure (four bytes per subkey, four subkeys to
+peel). Only Giraud-\emph{unknown} rises slightly (median \(\approx 34.6\)) because
+not knowing which bit flipped leaves eight possible values of \(e\) instead of
+one, a weaker filter in step~3. So on SM4 the honest statement is: \emph{Piret and
+Giraud are the same attack, differing only in whether the injected fault is a
+known whole byte or a single bit.} On AES that is not true, because AES has no
+MixColumns in the last round and Giraud exploits exactly that.
+
+\paragraph{Cost of the master key.}
+A further difference is how much a successful campaign buys. Reversing the AES
+key schedule needs the single 128-bit last-round key \(K_{10}\), so one campaign
+plus a schedule inversion recovers the master key. The SM4 schedule instead needs
+\emph{four consecutive} 32-bit round keys (\(rk_{31},rk_{30},rk_{29},rk_{28}\)),
+so the attacker must mount four successive campaigns --- faulting rounds 31, 30,
+29 and 28 in turn and peeling off each recovered subkey --- before the master key
+can be reconstructed. SM4's extra rounds make each attack recover proportionally
+less per fault.
+
 \section*{Summary}
 For AES Giraud, inject a one-bit fault before final-round SubBytes, test inverse-S-box differences for Hamming weight one, and intersect key-byte candidates. The corresponding SM4 adaptation first inverts the linear map $L$ to isolate the S-box differential.
 
