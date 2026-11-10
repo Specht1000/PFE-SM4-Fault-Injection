@@ -33,7 +33,9 @@ types = '''<?xml version="1.0" encoding="utf-8"?>
 destination = root / f"{package['name']}-{package['version']}.vsix"
 with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as output:
     output.writestr("extension.vsixmanifest", manifest)
+
     output.writestr("[Content_Types].xml", types)
+
     for name in ("package.json", "extension.js", "README.md"):
         output.write(root / name, "extension/" + name)
 print(destination)

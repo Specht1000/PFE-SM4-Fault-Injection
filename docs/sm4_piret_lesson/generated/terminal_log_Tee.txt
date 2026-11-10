@@ -1,0 +1,24 @@
+class Tee:
+    """Keep the terminal's color detection and preserve its exact output."""
+    def __init__(self, terminal, output):
+        self.terminal = terminal
+
+        self.output = output
+
+    def write(self, text):
+        # Mirror each write to both destinations without removing ANSI color information.
+        self.terminal.write(text)
+
+        self.output.write(text)
+
+        self.output.flush()
+
+        return len(text)
+
+    def flush(self):
+        self.terminal.flush()
+
+        self.output.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.terminal, name)

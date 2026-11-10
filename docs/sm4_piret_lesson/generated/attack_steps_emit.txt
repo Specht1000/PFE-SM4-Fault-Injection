@@ -1,0 +1,18 @@
+def emit(terminal, events):
+    """Print the same timeline as the GUI; preserve red changed bytes in logs."""
+
+    for event in events:
+        terminal.section(event['title'])
+
+        correct, faulty = bytes.fromhex(event['reference']), bytes.fromhex(event['state'])
+
+        # Color changes against the paired clean state; do not color all bytes indiscriminately.
+        if correct != faulty:
+            if hasattr(terminal, 'pair'):
+                terminal.pair(correct, faulty)
+            else:
+                terminal.compare(correct, faulty)
+
+        print(event['detail'])
+
+        terminal.pause()

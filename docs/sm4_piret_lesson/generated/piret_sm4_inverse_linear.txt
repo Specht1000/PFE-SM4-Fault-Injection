@@ -1,0 +1,4 @@
+def inverse_linear(value):
+    # AND selects input bits used by each inverse-matrix row. Their parity is
+    # the GF(2) dot product; shift that one-bit result into its output position.
+    return sum((bin(row & value).count("1") & 1) << index for index, row in enumerate(inverse_rows()))

@@ -1,0 +1,4 @@
+def sm4_byte_candidates(correct, faulty, byte, mask):
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+
+    return piret_sm4.sm4_byte_candidates(correct, faulty, byte, mask)

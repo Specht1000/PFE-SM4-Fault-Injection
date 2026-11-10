@@ -1,0 +1,94 @@
+\chapter{Connect the Python statements to a physical experiment}
+\section{Three different meanings of ``execution''}
+\remember{\textbf{Today: all Python functions in this lesson run on your PC.} The simulator calls \texttt{sm4.py}; it does not communicate with the ChipWhisperer or STM32. The following drawings describe how those roles would map to a future board experiment. They are conceptual diagrams, not measured waveforms or a wiring guide.}
+
+\begin{center}
+\begin{tikzpicture}[node distance=6mm]
+\node[box,text width=105mm] (host) {\textbf{Host PC}\\Python controller, received ciphertexts, candidate sets, inverse L, inverse schedule, terminal and logs};
+\node[box,below=of host,text width=105mm] (cw) {\textbf{ChipWhisperer-Lite capture/glitch platform}\\Synchronization and a configured electrical disturbance\\Does not solve the S-box equations};
+\node[box,below=of cw,text width=105mm] (stm) {\textbf{STM32F303 target running firmware}\\Holds the secret key; executes SM4; returns a ciphertext\\Does not normally reveal internal A, B or round keys};
+\draw[flow](host)--node[right]{control requests}(cw);
+\draw[flow](cw)--node[right]{clock or voltage disturbance}(stm);
+\draw[flow] (stm.west)--++(-12mm,0)|-(host.west);
+\node[rotate=90,fill=white,inner sep=2pt] at ([xshift=-12mm]cw.west) {response data};
+\end{tikzpicture}
+\end{center}
+The response path is schematic: an actual transport implementation determines how the host exchanges commands and bytes with the target. The current \texttt{oracle()} is a Python callable, not that transport. Clock and voltage glitching are distinct configurations; this drawing does not imply both are applied together.
+
+\section{What happens to a word on a processor?}
+In Python, \texttt{value} is an integer object in the host process. In compiled firmware, a corresponding intermediate word may be in a CPU register, stack or RAM, depending on the compiler and instructions. Without examining the firmware binary and timing, we cannot assign it to a specific physical register or clock edge.
+
+\begin{center}
+\begin{tikzpicture}[node distance=5mm]
+\node[box,text width=107mm] (load) {Read the three state words and the round key\\Firmware data: $X_{i+1},X_{i+2},X_{i+3},rk_i$};
+\node[box,below=of load,text width=107mm] (xor) {XOR instructions form $A$\\Illustrative logical value: \texttt{96 FF 9D 45}};
+\node[box,fault,below=of xor,text width=107mm] (faultword) {\textbf{Simulated replacement at the observation boundary}\\\texttt{96 FF 9D 45} XOR \texttt{01 00 00 00} = \texttt{97 FF 9D 45}};
+\node[box,below=of faultword,text width=107mm] (lookup) {Four S-box substitutions, then rotations/XOR\\The altered byte influences later intermediate results};
+\node[box,below=of lookup,text width=107mm] (send) {The final output buffer contains the ciphertext\\These bytes are what an external attacker can normally observe};
+\draw[flow](load)--(xor);\draw[flow](xor)--(faultword);\draw[flow](faultword)--(lookup);\draw[flow](lookup)--(send);
+\end{tikzpicture}
+\end{center}
+The red box is exactly what \texttt{value \^{}= mask << (24 - 8 * byte)} models. A physical glitch does \emph{not} execute this Python assignment and does not inherently guarantee mask 01 or this precise intermediate boundary.
+
+\section{A timing drawing: trigger, computation and disturbance}
+The horizontal scale below is symbolic; it is not an experimentally measured timing window.
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm]
+\draw[flow] (0,0)--(12,0) node[right]{time};
+\node[left] at (0,2.7) {trigger};
+\draw[thick] (0,2.3)--(1,2.3)--(1,3)--(10.8,3)--(10.8,2.3)--(11.5,2.3);
+\node[left] at (0,1.4) {SM4};
+\draw (1,1) rectangle (10.8,1.8);
+\node at (3.1,1.4) {earlier rounds};
+\draw[dashed] (5.3,1)--(5.3,1.8);
+\node at (8,1.4) {selected final-round region};
+\draw[red,thick] (7.1,.2)--(7.1,3.4);
+\node[red,above,align=center] at (7.1,3.4) {candidate disturbance time\\not an established byte fault};
+\draw[<->] (1,.4)--node[below]{delay relative to synchronization}(7.1,.4);
+\end{tikzpicture}
+\end{center}
+ChipWhisperer documentation describes trigger-synchronized glitch generation and routing for clock or voltage experiments. Whether the disturbance affects the intended operation must be characterized on the actual target. A trigger near encryption gives a time reference, not automatic knowledge of a round, byte or XOR mask.
+
+\section{Why a physical attempt is not the same as a modeled observation}
+\begin{center}
+\begin{tikzpicture}[node distance=6mm]
+\node[box,text width=88mm] (request) {Request one target encryption and one disturbance};
+\node[box,below=of request,text width=88mm] (classify) {Observe the response and classify the attempt};
+\node[box,below=of classify,text width=88mm] (cases) {No change / no response / reset / changed output};
+\node[box,below=of cases,text width=88mm] (check) {For changed outputs, test the assumed fault model\\A compatible XOR pattern is a necessary check};
+\node[box,below=of check,text width=88mm,fill=green!5] (solve) {Use only justified observations for candidate filtering\\Known-mask access still requires independent justification};
+\draw[flow](request)--(classify);\draw[flow](classify)--(cases);\draw[flow](cases)--(check);\draw[flow](check)--(solve);
+\end{tikzpicture}
+\end{center}
+The software model directly produces the selected byte XOR, so its \texttt{used=32} counts successful modeled ciphertext queries. A physical campaign must also count ineffective attempts, resets, rejected faults and acquisition failures. Its total attempt count is not established by the software value 32.
+
+An output pattern consistent with a model does not by itself prove the precise physical fault location or known mask. Do not use the secret test key to select observations and then claim the attacker knew the mask independently.
+
+\section{The candidate set exists on the PC, not inside the chip}
+\begin{center}
+\begin{tikzpicture}[node distance=5mm]
+\node[box,text width=97mm] (pair) {Host receives a correct/faulty output pair\\\texttt{C[0] XOR F[0] = 734E3D3D}};
+\node[box,below=of pair,text width=97mm] (inverse) {Host computes $L^{-1}$\\\texttt{DeltaB = 4F000000}};
+\node[box,below=of inverse,text width=97mm] (first) {Host enumerates 256 input guesses\\Key-byte candidates $\{90,91\}$};
+\node[box,below=of first,text width=97mm] (intersection) {Host intersects the next independent observation\\$\{90,91\}\cap\{70,72,91,93\}=\{91\}$};
+\draw[flow](pair)--(inverse);\draw[flow](inverse)--(first);\draw[flow](first)--(intersection);
+\end{tikzpicture}
+\end{center}
+No operation in this drawing rewinds the target, reads its secret memory or removes bits electrically. The host is solving equations about bytes it already received.
+
+\section{Source for the physical-platform concepts}
+The hardware-role and synchronization discussion follows NewAE's official training material, \href{https://github.com/newaetech/chipwhisperer-tutorials/blob/master/courses_fault101_SOLN_Fault%201_1%20-%20Introduction%20to%20Clock%20Glitching-OPENADC-CWLITEARM.rst}{Fault 1.1: Introduction to Clock Glitching} and \href{https://github.com/newaetech/chipwhisperer-tutorials/blob/master/courses_fault101_SOLN_Fault%202_1%20-%20Introduction%20to%20Voltage%20Glitching-OPENADC-CWLITEARM.rst}{Fault 2.1: Introduction to Voltage Glitching}. Those tutorials illustrate platform concepts; their example target behavior does not validate this SM4 byte-fault model on an STM32F303.
+
+\chapter{How to read the function-by-function pages}
+The following two chapters cover \emph{every function defined in \texttt{piret\_sm4.py} and \texttt{run.py}}, including nested callbacks and methods defined in the latter's terminal class. The AES-only functions in \texttt{run.py} are explicitly labeled as inactive for \texttt{--algorithm sm4}; they are included so no function in either requested file is silently skipped.
+
+For each function, read in this order:
+\begin{enumerate}
+\item The purpose sentence and its input--processing--output diagram.
+\item The physical-interpretation box, which says what happens on the PC and what only models target behavior.
+\item The complete numbered source, copied from the current repository.
+\item The line table, explaining each executable physical source line and every continuation or alternate branch.
+\end{enumerate}
+Blank lines, comments and docstrings remain visible in the numbered source but have no separate execution step; the table does not pretend they perform computations. A function definition creates a callable, and a nested callback body runs later only when called. Loops cause a source line to execute repeatedly; they are not new source lines on each iteration.
+
+The line tables describe what each statement does, not one CPU instruction per Python line. A Python expression can execute many host operations; compiled STM32 firmware has a different instruction stream. Current source line numbers and the table's coverage manifest are refreshed whenever this PDF is rebuilt.

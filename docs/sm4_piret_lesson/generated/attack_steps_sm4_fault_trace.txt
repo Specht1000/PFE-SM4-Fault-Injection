@@ -1,0 +1,52 @@
+def sm4_fault_trace(clean_trace, fault_trace, number, byte, mask):
+    """Teacher-only propagation; these internal values never enter the solver."""
+
+    for r in range(number, 32):
+        clean, fault = clean_trace[r], fault_trace[r]
+
+        lines = ["TEACHER VIEW: target internals shown for explanation only."]
+
+        if r == number:
+            lines.append(f"Inject at round {r}, byte {byte}: A' = {clean['a']:08X} XOR {mask << (24-8*byte):08X} = {fault['a']:08X}")
+
+        for label, field in (("S-box input", 'a'), ("S-box output", 'b'), ("Linear output", 'linear'), ("New word", 'new')):
+            lines.append(f"{label}: correct={clean[field]:08X}; faulty={fault[field]:08X}; XOR={clean[field] ^ fault[field]:08X}")
+
+        for title, item in (("Correct", clean), ("Faulty", fault)):
+            computed_value_values = []
+
+            for index, value_2 in enumerate(item['a'].to_bytes(4, 'big')):
+                computed_value_values.append(f'{title} S-box byte {index}: S[{value_2:02X}]={sm4.SBOX[value_2]:02X}')
+
+            lines += computed_value_values
+            b = item['b']
+            rotations = []
+
+            for candidate_number in (2, 10, 18, 24):
+                rotations.append((b << candidate_number | b >> 32 - candidate_number) & 4294967295)
+
+            formatted_values = []
+
+            for value in rotations:
+                formatted_values.append(f'{value:08X}')
+
+            lines.append(f'{title} L: {b:08X} XOR ' + ' XOR '.join(formatted_values) + f" = {item['linear']:08X}")
+
+        # These display rows are A, tau(A), L(tau(A)), and the new word, not a rolling cipher state.
+        element_values_2 = []
+
+        for candidate_field_2 in ('a', 'b', 'linear', 'new'):
+            element_values_2.append(clean[candidate_field_2])
+
+        clean_state = struct.pack('>4I', *element_values_2)
+
+        element_values = []
+
+        for candidate_field in ('a', 'b', 'linear', 'new'):
+            element_values.append(fault[candidate_field])
+
+        fault_state = struct.pack('>4I', *element_values)
+
+        lines.append("Displayed rows: A, tau(A), L(tau(A)), new word.")
+
+        yield step(r, f"Fault propagation: SM4 round {r}", lines, clean_state, fault_state)

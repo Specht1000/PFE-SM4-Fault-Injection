@@ -70,6 +70,7 @@ CK = (
 
 def rotl(val: int, count: int) -> int:
     """Rotate a 32-bit unsigned word left; overflow wraps into the low bits."""
+
     # Mask the shifted high bits to 32 bits, then wrap the overflow into low positions.
     return ((val << count) & WORD_MASK) | (val >> (32 - count))
 
@@ -80,22 +81,32 @@ def linear(b: int) -> int:
     L is XOR-linear: L(a XOR b) = L(a) XOR L(b). The SM4 DFA uses this
     property to invert an observed output difference before testing the S-box.
     """
+
     # XOR rotations, not integer sums: this is why L is linear over GF(2).
     return b ^ rotl(b, 2) ^ rotl(b, 10) ^ rotl(b, 18) ^ rotl(b, 24)
 
 
 def linear_key(b: int) -> int:
     """Key-schedule diffusion L-prime: rotations 13 and 23, not data-map L."""
+
     # The key schedule has different rotation amounts from encryption diffusion.
     return b ^ rotl(b, 13) ^ rotl(b, 23)
 
 
 def sbox(a: int) -> int:
     """Apply tau: substitute all four bytes, preserving big-endian word order."""
+
     # Pack as four big-endian bytes so byte zero remains the most significant.
     input_bytes = struct.pack('>I', a)
+
     # Each byte is substituted independently; tau does not mix neighboring bytes.
-    substituted_bytes = bytes(SBOX[byte] for byte in input_bytes)
+    byte_values = []
+
+    for byte in input_bytes:
+        byte_values.append(SBOX[byte])
+
+    substituted_bytes = bytes(byte_values)
+
     return struct.unpack('>I', substituted_bytes)[0]
 
 
@@ -110,11 +121,19 @@ def observe(observer, number, operation, value):
     An observer may return a replacement value, or None to leave it unchanged.
     Fault coordinates and masks belong to the external attack, never this file.
     """
+
     if observer is None:
         return value
+
     # Only the external observer can request a replacement; None preserves normal execution.
     replacement = observer(number, operation, value)
-    return value if replacement is None else replacement
+
+    if replacement is None:
+        result_value = value
+    else:
+        result_value = replacement
+
+    return result_value
 
 
 def round(x: list[int], rk: int, observer=None, round_index=0):
@@ -123,12 +142,17 @@ def round(x: list[int], rk: int, observer=None, round_index=0):
     A = X[i+1] XOR X[i+2] XOR X[i+3] XOR rk[i]
     X[i+4] = X[i] XOR L(tau(A))
     """
+
     # Form the nonlinear input from the newest three words and the round key.
     sbox_input = observe(observer, round_index, "Sbox input", x[1] ^ x[2] ^ x[3] ^ rk)
+
     substituted = observe(observer, round_index, "Sbox output", sbox(sbox_input))
+
     diffused = observe(observer, round_index, "Linear output", linear(substituted))
+
     # XOR with the oldest word, then drop that word when returning the next window.
     new_word = observe(observer, round_index, "New word", x[0] ^ diffused)
+
     return x[1], x[2], x[3], new_word
 
 
@@ -138,6 +162,7 @@ def generate_round_key(k: list[int], round: int) -> int:
     The parameter name round is retained for callers using keyword arguments.
     Encryption and expansion share tau, but expansion must use linear_key.
     """
+
     # Use public CK for this schedule round; this is not an encryption round key input.
     return k[0] ^ linear_key(sbox(k[1] ^ k[2] ^ k[3] ^ CK[round]))
 
@@ -149,15 +174,23 @@ def generate_round_key(k: list[int], round: int) -> int:
 
 def key_expansion(key: bytes) -> list[int]:
     """Return rk0..rk31; each is one new word from the key recurrence."""
+
     if len(key) != BLOCK_SIZE:
         raise ValueError("SM4 key must contain exactly 16 bytes.")
+
     master_words = struct.unpack(">4I", key)
+
     # Whiten the master words with four fixed public FK constants before expansion.
-    schedule_words = [master_words[i] ^ FK[i] for i in range(4)]
+    schedule_words = []
+
+    for index in range(4):
+        schedule_words.append(master_words[index] ^ FK[index])
+
 
     for i in range(N_ROUNDS):
         # Keep previous words for readability; the recurrence consumes a window.
         next_key = generate_round_key(schedule_words[i:i+4], i)
+
         schedule_words.append(next_key)
 
     # The initial four whitened words are not encryption round keys.
@@ -175,28 +208,42 @@ def sm4_process_block(block: bytes, key: bytes, encrypt: bool, observer=None) ->
     The final four-word reversal is part of SM4, not a byte-endianness change.
     Reversing only the key order is sufficient to run the inverse cipher.
     """
+
     if len(block) != BLOCK_SIZE:
         raise ValueError("SM4 block must contain exactly 16 bytes.")
+
     state = list(struct.unpack(">4I", block))
+
     round_keys = key_expansion(key)
+
     for i in range(N_ROUNDS):
         # Decryption reuses the round function, changing only the round-key order.
-        key_index = i if encrypt else N_ROUNDS - 1 - i
+        if encrypt:
+            key_index = i
+        else:
+            key_index = N_ROUNDS - 1 - i
+
         state = list(observe(observer, i, "State input", tuple(state)))
+
         state = list(round(state, round_keys[key_index], observer, i))
+
         state = list(observe(observer, i, "State output", tuple(state)))
+
     # Reverse word order at output; do not reverse bytes within each word.
     output = struct.pack(">4I", *state[::-1])
+
     return observe(observer, N_ROUNDS, "Ciphertext", output)
 
 
 def sm4_encrypt_block(x: bytes, key: bytes, observer=None) -> bytes:
     """Encrypt one 16-byte block using round keys in forward order."""
+
     return sm4_process_block(x, key, encrypt=True, observer=observer)
 
 
 def sm4_decrypt_block(x: bytes, key: bytes, observer=None) -> bytes:
     """Decrypt one 16-byte block using the identical round function."""
+
     return sm4_process_block(x, key, encrypt=False, observer=observer)
 
 
@@ -207,18 +254,27 @@ def sm4_decrypt_block(x: bytes, key: bytes, observer=None) -> bytes:
 
 def main():
     """Run the editable example; importing SM4 never starts this demonstration."""
+
     plaintext, key = bytes.fromhex(PLAINTEXT), bytes.fromhex(KEY)
+
     print("SM4 ENCRYPTION\nPlaintext: " + plaintext.hex().upper())
+
     ciphertext = sm4_encrypt_block(plaintext, key)
+
     print("Ciphertext: " + ciphertext.hex().upper())
     print("\nSM4 DECRYPTION: round keys are used in reverse order")
+
     recovered = sm4_decrypt_block(ciphertext, key)
+
     print("Recovered: " + recovered.hex().upper())
+
     if recovered != plaintext:
         raise RuntimeError("SM4 round-trip verification failed.")
+
     print("Round-trip verification: PASS")
 
 
 if __name__ == "__main__":
     from terminal_log import run_with_log
+
     raise SystemExit(run_with_log(main, "sm4"))

@@ -1,0 +1,15 @@
+def reverse_sm4(final_keys, observer=None):
+    """Four consecutive keys rk28..rk31 are REQUIRED, not merely rk31."""
+    if len(final_keys) != 4:
+        raise ValueError("SM4 reversal requires four consecutive final subkeys.")
+    # rk28..rk31 occupy K32..K35, supplying the four-word seed for inversion.
+    words = [None] * 32 + list(final_keys)
+    for index in range(31, -1, -1):
+        # Descending order ensures all words on the right are already known.
+        # CK is public; use the key-schedule transform L', not encryption's L.
+        value = words[index+1] ^ words[index+2] ^ words[index+3] ^ sm4.CK[index]
+        words[index] = words[index+4] ^ sm4.linear_key(sm4.sbox(value))
+        if observer:
+            observer(index, words[index])
+    # K0..K3 still include FK whitening; remove it and serialize the master key.
+    return struct.pack(">4I", *(words[i] ^ sm4.FK[i] for i in range(4)))

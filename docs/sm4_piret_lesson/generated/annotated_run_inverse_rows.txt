@@ -1,0 +1,4 @@
+def inverse_rows():
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+
+    return piret_sm4.inverse_rows()

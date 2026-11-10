@@ -1,0 +1,8 @@
+def show_aes_key_schedule(terminal, last_key):
+    """Explain every reversed AES word and assemble K9 down to K0."""
+
+    master, events = attack_steps.aes_schedule(last_key)
+
+    attack_steps.emit(terminal, events)
+
+    return master

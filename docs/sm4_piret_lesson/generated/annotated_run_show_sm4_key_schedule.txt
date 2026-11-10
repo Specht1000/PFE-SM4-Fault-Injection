@@ -1,0 +1,8 @@
+def show_sm4_key_schedule(terminal, recovered_keys):
+    """Explain inverse expansion and FK removal from the DFA-recovered tail."""
+
+    master, events = attack_steps.sm4_schedule(recovered_keys)
+
+    attack_steps.emit(terminal, events)
+
+    return master

@@ -1,0 +1,9 @@
+class LessonTerminal(piret_aes.Terminal):
+    def changed(self, original, faulty):
+        return " ".join(self.paint(f"{value:02X}", "31") if value != original[i] else f"{value:02X}" for i, value in enumerate(faulty))
+
+    def pair(self, correct, faulty):
+        print("Correct: " + " ".join(f"{b:02X}" for b in correct))
+        print("Faulty:  " + self.changed(correct, faulty))
+        delta = bytes(a ^ b for a, b in zip(correct, faulty))
+        print("XOR:     " + self.changed(bytes(len(delta)), delta))

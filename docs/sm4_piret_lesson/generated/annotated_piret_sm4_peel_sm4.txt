@@ -1,0 +1,28 @@
+def peel_sm4(ciphertext, target_round, recovered_keys):
+    """Undo only rounds whose subkeys have ALREADY been recovered by DFA.
+
+    Return a reversed four-word output at the end of target_round. This lets
+    the same last-round equations analyze rounds 30, 29 and 28 in succession.
+    No reference round keys or secret intermediate values are accepted.
+    """
+
+    aes.validate_block(ciphertext, "SM4 ciphertext")
+
+    if not 28 <= target_round <= 31:
+        raise ValueError("Full SM4 recovery targets rounds 28..31.")
+
+    # Ciphertext reverses the final four words; restore chronological state order.
+    words = list(struct.unpack(">4I", ciphertext))[::-1]
+
+    for number in range(31, target_round, -1):
+        if number not in recovered_keys:
+            raise ValueError(f"Cannot undo round {number} before recovering its subkey.")
+
+        # Recompute the round transform with an already recovered key; XOR the
+        # newest word to recover the word that was dropped from the window.
+        previous = words[3] ^ sm4.linear(sm4.sbox(words[0] ^ words[1] ^ words[2] ^ recovered_keys[number]))
+
+        words = [previous, words[0], words[1], words[2]]
+
+    # Return ciphertext-style order so the same last-round filter can be reused.
+    return struct.pack(">4I", *words[::-1])

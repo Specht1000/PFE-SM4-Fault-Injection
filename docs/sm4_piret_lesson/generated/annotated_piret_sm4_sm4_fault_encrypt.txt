@@ -1,0 +1,38 @@
+def sm4_fault_encrypt(plaintext, key, byte=None, mask=0, fault_round=31):
+    """Run sm4.py with an external S-box-input XOR in a selected round.
+
+    This PDF model assumes a controlled known byte fault. Giraud restricts the
+    mask to a single bit before reusing this target adapter.
+    """
+
+    if byte is not None and not (0 <= byte < 4 and 1 <= mask <= 255):
+        raise ValueError("SM4 fault requires byte 0..3 and mask 1..255.")
+
+    if not 0 <= fault_round < 32:
+        raise ValueError("SM4 fault round must be 0..31.")
+
+    # A list holds one 32-bit round key at each index from 0 through 31.
+    keys = sm4.key_expansion(key)
+
+    # {round: i, rk: 32-bit integer}
+    trace = []
+
+    for index in range(32):
+        trace.append(dict(round=index, rk=keys[index]))
+
+    fields = {"Sbox input": "a", "Sbox output": "b", "Linear output": "linear", "New word": "new"}
+
+    def observer(number, operation, value):
+        # Byte 0 is the most significant byte: move its mask to bits 31..24.
+        # Returning this replacement changes the real cipher at this exact event.
+        if number == fault_round and operation == "Sbox input" and byte is not None:
+            value ^= mask << (24 - 8 * byte)
+
+        if operation in fields:
+            trace[number][fields[operation]] = value
+
+        return value
+
+    ciphertext = sm4.sm4_encrypt_block(plaintext, key, observer=observer)
+
+    return ciphertext, trace

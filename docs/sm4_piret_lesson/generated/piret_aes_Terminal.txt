@@ -1,0 +1,91 @@
+class Terminal:
+    """ANSI styling is optional; redirected output stays readable by default."""
+    def __init__(self, color="auto", step=False):
+        # Respect explicit color settings, terminal capability and the NO_COLOR environment flag.
+        self.color = color == "always" or color == "auto" and sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+        self.step = step
+
+        if self.color and os.name == "nt":
+            # Enable virtual-terminal processing without requiring colorama.
+            import ctypes
+            kernel = ctypes.windll.kernel32
+            handle, mode = kernel.GetStdHandle(-11), ctypes.c_ulong()
+
+            if not kernel.GetConsoleMode(handle, ctypes.byref(mode)) or not kernel.SetConsoleMode(handle, mode.value | 4):
+                # Respect explicit color settings, terminal capability and the NO_COLOR environment flag.
+                self.color = color == "always"
+
+    def paint(self, text, code="36"):
+        """Wrap one fragment in ANSI codes; reset immediately to avoid color bleed."""
+
+        # Reset ANSI styling after each fragment so red does not leak into neighboring values.
+        if self.color:
+            result_value = f'\x1b[{code}m{text}\x1b[0m'
+        else:
+            result_value = str(text)
+
+        return result_value
+
+    def section(self, title):
+        """Print a visible teaching boundary without affecting cryptographic data."""
+
+        print("\n" + self.paint("=" * 76, "36"))
+        print(self.paint(title, "1;36"))
+
+    def pause(self):
+        """Automatic execution remains the default unless --step was requested."""
+
+        # Pause only in interactive step mode; ordinary execution and tests remain automatic.
+        if self.step:
+            input("\nPress Enter to continue...")
+
+    def compare(self, correct, faulty):
+        """Compare two 16-byte states in AES row order and highlight fault effects."""
+
+        byte_values = []
+
+        for input_value, byte_2 in zip(correct, faulty):
+            byte_values.append(input_value ^ byte_2)
+
+        delta = bytes(byte_values)
+
+        print("          CLEAN STATE         FAULTY STATE        XOR DIFFERENCE")
+
+        for row in range(4):
+            clean_cells, faulty_cells, diff_cells = [], [], []
+
+            for column in range(4):
+                # Render AES rows while reading bytes in their actual column-major order.
+                index = 4 * column + row
+                clean_cells.append(f"{correct[index]:02X}")
+
+                if delta[index]:
+                    element_values_6 = self.paint(f'{faulty[index]:02X}', '31')
+                else:
+                    element_values_6 = f'{faulty[index]:02X}'
+
+                faulty_cells.append(element_values_6)
+
+                if delta[index]:
+                    element_values_5 = self.paint(f'{delta[index]:02X}', '31')
+                else:
+                    element_values_5 = '00'
+
+                diff_cells.append(element_values_5)
+
+            print(f"row {row}:    {' '.join(clean_cells)}        {' '.join(faulty_cells)}        {' '.join(diff_cells)}")
+
+        changed = []
+
+        for candidate_index, byte_3 in enumerate(delta):
+            if byte_3:
+                changed.append(candidate_index)
+
+        element_values = []
+
+        for byte in delta:
+            element_values.append(bin(byte).count('1'))
+
+        print(f'Changed bytes: {len(changed)}/16 | Changed bits: {sum(element_values)}/128')
+        print(f"Changed flat positions (4*column+row): {changed}")

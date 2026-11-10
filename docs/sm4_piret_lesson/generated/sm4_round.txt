@@ -1,0 +1,18 @@
+def round(x: list[int], rk: int, observer=None, round_index=0):
+    """Return the next rolling window without modifying the supplied words.
+
+    A = X[i+1] XOR X[i+2] XOR X[i+3] XOR rk[i]
+    X[i+4] = X[i] XOR L(tau(A))
+    """
+
+    # Form the nonlinear input from the newest three words and the round key.
+    sbox_input = observe(observer, round_index, "Sbox input", x[1] ^ x[2] ^ x[3] ^ rk)
+
+    substituted = observe(observer, round_index, "Sbox output", sbox(sbox_input))
+
+    diffused = observe(observer, round_index, "Linear output", linear(substituted))
+
+    # XOR with the oldest word, then drop that word when returning the next window.
+    new_word = observe(observer, round_index, "New word", x[0] ^ diffused)
+
+    return x[1], x[2], x[3], new_word

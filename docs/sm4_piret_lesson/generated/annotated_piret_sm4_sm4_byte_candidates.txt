@@ -1,0 +1,45 @@
+def sm4_byte_candidates(correct, faulty, byte, mask):
+    """Attacker API: outputs and the PDF's KNOWN fault byte/value only."""
+
+    if len(correct) != 16 or len(faulty) != 16 or not 0 <= byte < 4 or not 1 <= mask <= 255:
+        raise ValueError("Invalid SM4 output or known-fault descriptor.")
+
+    c, f = struct.unpack(">4I", correct), struct.unpack(">4I", faulty)
+
+    # The restored last-round model allows only its newest output word to change.
+    if c[1:] != f[1:]:
+        raise ValueError("The last-round model requires three output words unchanged.")
+
+    # Cancel the unchanged older word and undo diffusion to isolate S-box differences.
+    delta_b = inverse_linear(c[0] ^ f[0])
+
+    shift = 24 - 8 * byte
+
+    if not delta_b or delta_b & ~(255 << shift):
+        # Reject both a missing fault and differences outside the selected byte.
+        raise ValueError("Difference does not match a single-byte S-box input fault.")
+
+    d = (delta_b >> shift) & 255
+
+    # These three output words are public; their selected XOR byte is q.
+    known = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+
+    # Enumerate unknown S-box inputs a, then convert each to a key guess a XOR q.
+    inputs = set()
+
+    for candidate_input in range(256):
+        faulty_input = candidate_input ^ mask
+
+        output_difference = sm4.SBOX[candidate_input] ^ sm4.SBOX[faulty_input]
+
+        if output_difference == d:
+            inputs.add(candidate_input)
+
+    key_candidates = set()
+
+    for candidate_input in inputs:
+        key_byte = candidate_input ^ known
+
+        key_candidates.add(key_byte)
+
+    return key_candidates, inputs, delta_b

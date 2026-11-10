@@ -1,0 +1,769 @@
+\chapter{Line-by-line: \texttt{piret\_sm4.py}}
+\section{\texttt{sm4\_fault\_encrypt}}
+Simulate a controlled fault during the real SM4 implementation, while collecting teacher-only intermediates.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Plaintext and target key};
+\node[box,below=of input,text width=100mm] (action) {Run SM4; replace selected S-box input};
+\node[box,below=of action,text width=100mm] (output) {Faulty ciphertext and teaching trace};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} Target-side behavior is modeled here. In firmware, intermediate words could occupy CPU registers or RAM depending on compilation; this Python callback does not access STM32 registers.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=14]{generated/annotated_piret_sm4_sm4_fault_encrypt.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+14&Declare this callable and its parameters; the body runs only when called. Simulate a controlled fault during the real SM4 implementation, while collecting teacher-only intermediates.\\
+21&If a fault was requested, require a byte position 0..3 and a nonzero one-byte mask. None permits a clean reference run.\\
+22&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+24&Reject a selected round outside the zero-based 0..31 interval.\\
+25&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+28&Compute the target schedule for trace labeling. The result is a list indexed 0..31, not a dictionary; it is not passed to the output-only solver.\\
+31&Create an empty teaching trace; the following explicit loop adds one record for each round.\\
+33&Visit all thirty-two round indices to construct the trace records.\\
+34&Add the record for this round and its target-side round key to the teacher trace.\\
+36&Translate cipher callback event names into short trace dictionary fields a, b, linear and new.\\
+38&Define the target callback; its body executes later when the normal cipher calls the observation hook, not when this definition is reached.\\
+41&Inject only when both round and operation match, and a target byte was selected; other events pass through unchanged.\\
+42&Move the mask into the selected big-endian byte and XOR it into the word. For byte 0 and mask 01, the shifted mask is 01000000.\\
+44&Record only named scalar intermediate events; ignore other observation events for this teacher trace.\\
+45&Save the observed scalar at its round and semantic field, so the terminal can compare clean and faulty calculations.\\
+47&Return the unchanged or injected scalar to the normal SM4 engine; this returned replacement is what the next cipher operation consumes.\\
+49&Execute normal SM4 with the external observer attached. A returned observer replacement is consumed by the real round function.\\
+51&Return the target output together with teacher-only intermediate records. The oracle later forwards only the ciphertext to the solver.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{inverse\_rows}}
+Construct and cache the inverse of the public 32-bit diffusion map.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Public SM4 linear map L};
+\node[box,below=of input,text width=100mm] (action) {Binary Gaussian elimination on [M | I]};
+\node[box,below=of action,text width=100mm] (output) {Rows of inverse L};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This is attacker-side algebra on the PC. No pulse, board read or secret key is required.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=54]{generated/annotated_piret_sm4_inverse_rows.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+54&Cache the public inverse-matrix result after the first calculation. The matrix is key-independent and is not recomputed for every observation.\\
+55&Declare this callable and its parameters; the body runs only when called. Construct and cache the inverse of the public 32-bit diffusion map.\\
+59&Prepare the list of images of the thirty-two input basis words under the public map L.\\
+61&Choose each input basis bit explicitly, from bit zero through bit thirty-one.\\
+62&Construct a 32-bit word with exactly the selected input bit set.\\
+64&Apply public encryption diffusion L to that basis word, obtaining one matrix column.\\
+66&Store this basis image as the next column of the binary matrix.\\
+69&Prepare the augmented-matrix row list before encoding individual row bits.\\
+71&Construct each output row of the binary matrix explicitly.\\
+72&Start this encoded matrix row with every bit cleared.\\
+74&Read the selected output bit from each stored matrix column.\\
+75&Extract the bit indicating whether this input column contributes to the selected output row.\\
+76&Place that contribution bit in the encoded matrix row; OR combines disjoint bit positions.\\
+78&Place the matching identity-matrix bit in the upper half of the augmented row.\\
+80&Combine the L-matrix row with its identity bit to form the packed row of [M | I].\\
+82&Store the completed augmented row before Gaussian elimination.\\
+84&Process one pivot column of the 32-by-32 binary matrix at a time.\\
+86&Mark the pivot as not yet found; the following ordinary loop searches eligible rows.\\
+88&Search the current and remaining rows for a one in the pivot column.\\
+89&Read the current candidate row bit at the pivot column.\\
+91&Accept this row as a valid pivot only if its selected column bit is one.\\
+92&Remember the actual row index, then stop searching because a valid pivot was found.\\
+93&Stop searching pivot rows as soon as a valid row has been found.\\
+95&Detect a missing pivot instead of blindly swapping an invalid row index.\\
+96&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+98&Swap the chosen pivot row into the current diagonal position.\\
+100&Visit every augmented row so the current column can be cleared outside its pivot.\\
+101&Leave the pivot unchanged; eliminate only another row whose pivot-column bit is one.\\
+103&XOR the entire augmented pivot row into that row, performing GF(2) row elimination on both halves.\\
+106&Prepare the final public inverse-matrix rows after elimination.\\
+108&Visit each reduced augmented row to extract its inverse half.\\
+109&Discard the lower identity half and retain the upper inverse-matrix row.\\
+111&Add the extracted inverse row in the original output-bit order.\\
+113&Return an immutable sequence of inverse rows, cached for reuse by later observations.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{inverse\_linear}}
+Apply the inverse binary matrix to one observed output difference.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {32-bit output XOR};
+\node[box,below=of input,text width=100mm] (action) {Compute inverse-matrix row parities};
+\node[box,below=of action,text width=100mm] (output) {32-bit S-box output XOR};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} The PC transforms received ciphertext bytes into a mathematical difference. The target does not run backward.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=116]{generated/annotated_piret_sm4_inverse_linear.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+116&Declare this callable and its parameters; the body runs only when called. Apply the inverse binary matrix to one observed output difference.\\
+119&Clear the output word before placing one parity bit at a time.\\
+121&Associate each inverse-matrix row with the output bit it computes.\\
+122&Select exactly the input bits used by this inverse row.\\
+124&Count selected one bits; only whether this count is odd or even matters over GF(2).\\
+126&Keep the lowest count bit: odd becomes one and even becomes zero.\\
+128&Place this row parity into its output position without changing other output bits.\\
+130&Return the word assembled from all thirty-two inverse-row parity calculations.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{sm4\_byte\_candidates}}
+Find key-byte guesses consistent with one restored ciphertext pair and a known byte fault.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {C, F, byte index and known mask};
+\node[box,below=of input,text width=100mm] (action) {Undo L; test every S-box input};
+\node[box,below=of action,text width=100mm] (output) {Compatible key-byte set};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This filtering happens on the PC after a response has been received. The known-mask assumption must be established separately for a physical experiment.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=133]{generated/annotated_piret_sm4_sm4_byte_candidates.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+133&Declare this callable and its parameters; the body runs only when called. Find key-byte guesses consistent with one restored ciphertext pair and a known byte fault.\\
+136&Require two complete block outputs and valid controlled-fault descriptors before interpreting differences.\\
+137&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+139&Decode each sixteen-byte output into four big-endian unsigned 32-bit words.\\
+142&Require the last three restored output words to be unchanged. Otherwise this observation violates the selected last-round model.\\
+143&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+146&XOR the newest words, then undo public linear diffusion to recover the S-box output difference.\\
+148&Map byte 0,1,2,3 to bit shifts 24,16,8,0 in a big-endian 32-bit word.\\
+150&Reject a zero difference or any nonzero difference bit outside the selected byte.\\
+152&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+154&Select the affected S-box output difference byte, keeping only its lowest eight bits.\\
+157&Compute q: select a byte of the XOR of the three observable unchanged words. It is not a hidden state read.\\
+160&Start an empty set of compatible unknown S-box input bytes.\\
+162&Test each possible unknown input byte explicitly.\\
+163&Apply the known error hypothesis to the candidate S-box input.\\
+165&Calculate the clean/faulty S-box XOR for this candidate input and known error.\\
+167&Keep the hypothesis only if its predicted S-box difference equals the observed one.\\
+168&Record this compatible input value; the set removes duplicates.\\
+170&Prepare key-byte candidates separately from S-box input hypotheses.\\
+172&Convert each compatible S-box input into a key-byte guess.\\
+173&Solve a = q XOR key\_byte using the observable q byte.\\
+175&Store the resulting key-byte hypothesis for intersection with other observations.\\
+177&Return the key hypotheses, compatible S-box inputs and full inverse-L difference separately.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{reverse\_sm4}}
+Derive the initial key words from four consecutive recovered tail words, then remove FK.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Recovered rk28 through rk31};
+\node[box,below=of input,text width=100mm] (action) {Reverse schedule; remove public FK};
+\node[box,below=of action,text width=100mm] (output) {Original 128-bit master key};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} All schedule inversion runs on the PC. Public CK/FK constants are not extracted from the board.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=180]{generated/annotated_piret_sm4_reverse_sm4.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+180&Declare this callable and its parameters; the body runs only when called. Derive the initial key words from four consecutive recovered tail words, then remove FK.\\
+183&Require four consecutive tail subkeys; a single recovered rk31 is insufficient to seed the inverse schedule.\\
+184&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+187&Reserve K0..K31 as unknown and seed K32..K35 with recovered rk28..rk31 in that order.\\
+189&Recover schedule words in descending order so every right-hand dependency is already known.\\
+192&Form the public schedule-core input from three known neighboring words and CK[index].\\
+194&Apply the forward S-box and key-specific L-prime, then XOR with K[index+4] to solve for the older schedule word.\\
+196&Call optional explanatory instrumentation only if supplied; the numerical result has already been computed.\\
+197&Report this derived schedule word without giving the observer control over key recovery.\\
+200&Prepare four unwhitened master-key words.\\
+202&Remove FK separately for master-word positions zero through three.\\
+203&Undo initial key whitening with the corresponding public FK constant.\\
+204&Preserve the master-word order for final serialization.\\
+206&Serialize the four recovered master words into sixteen big-endian bytes.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{peel\_sm4}}
+Reconstruct an earlier output window using only already recovered later keys.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Ciphertext plus recovered later keys};
+\node[box,below=of input,text width=100mm] (action) {Undo later SM4 round recurrences};
+\node[box,below=of action,text width=100mm] (output) {Restored target-round output view};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This is offline PC computation. It neither rewinds the STM32 nor reads an old state from target RAM.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=209]{generated/annotated_piret_sm4_peel_sm4.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+209&Declare this callable and its parameters; the body runs only when called. Reconstruct an earlier output window using only already recovered later keys.\\
+217&Reuse a sixteen-byte length check. This does not execute AES and does not import an AES key into SM4 recovery.\\
+219&Restrict this full-recovery peeling helper to the four modeled target rounds.\\
+220&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+223&Read the four final output words, then reverse their order to restore the chronological rolling state.\\
+225&Undo only rounds later than the requested target round, newest first.\\
+226&Require a genuinely recovered later key before reversing its round; never substitute a reference key.\\
+227&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+231&Recompute the later-round nonlinear/linear transform and XOR with its newest word to reconstruct the missing oldest word.\\
+233&Shift the reconstructed window backward by one round: old, u0, u1, u2.\\
+236&Return a synthetic ciphertext-style view with word reversal, allowing reuse of the same last-round candidate equation.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{recover\_sm4\_master\_key}}
+Coordinate independent fault observations, intersections, four tail-key recoveries and inverse key expansion.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Correct output and fault oracle};
+\node[box,below=of input,text width=100mm] (action) {Recover rk31, rk30, rk29, rk28};
+\node[box,below=of action,text width=100mm] (output) {Master key or explicit ambiguity};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} On hardware, each oracle request would involve another target encryption and response. The implementation here makes software calls, not USB or serial requests.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=239]{generated/annotated_piret_sm4_recover_sm4_master_key.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+239&Declare this callable and its parameters; the body runs only when called. Coordinate independent fault observations, intersections, four tail-key recoveries and inverse key expansion.\\
+248&Reuse a sixteen-byte length check. This does not execute AES and does not import an AES key into SM4 recovery.\\
+250&Freeze a possibly one-shot iterable so every target byte can reuse the same ordered observation masks.\\
+252&Reject an empty fault-mask sequence before any target query.\\
+253&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+255&Reject repeated masks; deterministic repeated observations do not add constraints.\\
+256&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+258&Validate each supplied fault descriptor explicitly.\\
+259&Reject zero and masks that do not fit in one nonzero byte.\\
+260&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+262&Require the first selected byte position to be zero through three.\\
+263&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+265&Initialize recovered keys, event history, per-byte counts and actual faulty-output query count separately.\\
+267&Target rounds 31,30,29,28 in that order; later recovered keys enable peeling for the next target.\\
+269&Restore the clean reference to this target round using only the currently recovered later keys.\\
+271&Allocate four output bytes for the current round key; unfilled bytes must not be treated as recovered.\\
+273&Prepare an explicit ordering of all four byte positions for this round.\\
+275&Visit four offsets starting from the user-selected first byte.\\
+276&Wrap the byte position modulo four so every position appears once.\\
+278&Recover one complete key byte at a time in the chosen order.\\
+279&Mark the byte or group as unconstrained before its first observation; an empty set would instead mean inconsistency.\\
+282&Request distinct faults sequentially, numbering observations from one within this target byte/group.\\
+283&Query the simulated target for one new faulty ciphertext. No key or teacher trace is returned to this solver.\\
+285&Undo the same recovered later rounds in the faulty ciphertext so both outputs refer to the same target round.\\
+287&Choose the default known-byte filter unless another compatible filter, such as the Giraud-inspired one, was explicitly supplied.\\
+289&Apply the selected-round byte equation to this clean/faulty pair and known mask.\\
+290&The if-condition at line 287 was false; follow this alternative path rather than the preceding branch.\\
+291&Run the alternate filter and receive its inferred byte position alongside candidate sets and difference.\\
+293&Reject an alternate-filter result whose changed byte is inconsistent with the requested target byte.\\
+294&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+296&Distinguish the first observation from subsequent intersections; no previous candidate set exists yet.\\
+297&Before a first byte observation all 256 byte values are still possible.\\
+298&The first pair initializes the byte set; subsequent pairs intersect it. No new guess can be introduced by intersection.\\
+299&The if-condition at line 296 was false; follow this alternative path rather than the preceding branch.\\
+300&Record the number of hypotheses remaining before applying the new observation.\\
+301&Intersect the prior hypotheses with those from the new pair; never introduce a new candidate.\\
+304&An empty intersection means the observations and model cannot be reconciled; do not claim a key.\\
+305&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+307&Count one faulty ciphertext actually consumed by the solver, not a printed stage or a schedule replay.\\
+308&Store the surviving count for this particular round and byte.\\
+309&Prepare a display-only dictionary of already recovered later subkeys.\\
+311&Visit only subkeys already established by the solver.\\
+312&Format each recovered subkey as eight hexadecimal digits for event metadata.\\
+314&Package the measurement pair, restored views, known mask, input guesses, surviving key guesses and recovered peeling keys for presentation.\\
+315&Preserve this observation in order for later inspection and reproducibility.\\
+317&Only invoke the optional reporting callback if the caller requested it.\\
+319&Pass copied event metadata to reporting. Candidate-set intersection has already been decided in the solver.\\
+321&Uniqueness is the acceptance rule: one value remains compatible with all observations for this byte/group.\\
+323&Extract the sole surviving byte and store it at the correct big-endian position.\\
+324&Stop this observation loop immediately after uniqueness; do not query unused masks.\\
+325&The for-loop beginning at line 282 exhausted its observation budget without break; execute the following ambiguity result.\\
+328&Return an explicit incomplete result when the observation loop exhausts its budget without a break. No master key is selected.\\
+330&Concatenate the four uniquely recovered bytes into one 32-bit round key and make it available for future peeling.\\
+333&Prepare the four recovered tail keys in forward key-schedule order.\\
+335&Read rk28, rk29, rk30 and rk31 in the order expected by schedule inversion.\\
+336&Add the actual recovered subkey to the inverse-schedule seed.\\
+338&Arrange recovered rk28..rk31 in schedule order and reverse expansion to derive the original key.\\
+340&Return the complete key together with actual recovered tail keys, history, counts and fault-query cost.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{main}}
+Parse the attack-specific command and enter the same SM4 terminal lesson used by run.py.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Terminal command and options};
+\node[box,below=of input,text width=100mm] (action) {Validate options; call sm4\_demo};
+\node[box,below=of action,text width=100mm] (output) {Success or ambiguity exit status};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This is a PC entry point. Selecting --row chooses a simulated byte, not a physical chip coordinate. The compatibility options --column and --seed are parsed but not used in this SM4 path.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=343]{generated/annotated_piret_sm4_main.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+343&Declare this callable and its parameters; the body runs only when called. Parse the attack-specific command and enter the same SM4 terminal lesson used by run.py.\\
+346&Create the command-line option parser using the module description for help text.\\
+348&Register --algorithm. Select the allowed cipher branch for this entry point.\\
+349&Register --step. Enable pauses at teaching boundaries.\\
+350&Register --color. Select automatic, forced or disabled ANSI colors.\\
+351&Register --faults. Set the maximum distinct mask observations per SM4 target byte.\\
+352&Register --row. Choose the first simulated SM4 byte position.\\
+354&Register --column. Compatibility setting parsed but not used by this SM4 entry point.\\
+355&Register --seed. Used for AES mask sampling in run.py; not used for SM4 mask order.\\
+357&Decode the supplied argument list (or process command line) and enforce the declared argument types and choices.\\
+359&Reject an observation budget outside 1..255 before requesting any faulty outputs.\\
+360&Report invalid configuration and terminate argument processing rather than starting an invalid experiment.\\
+362&Load the shared terminal controller at call time. This avoids a top-level circular import between attack and presentation modules.\\
+364&Run the shared SM4 lesson and test whether full recovery verified.\\
+365&Return successful process status after verified complete recovery.\\
+367&Return the explicit ambiguity/failure status when full recovery was not verified.\\
+\bottomrule\end{longtable}\endgroup
+\chapter{Line-by-line: \texttt{run.py}}
+\section{\texttt{block}}
+Convert a hexadecimal input string to exactly sixteen bytes.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {32 hexadecimal characters};
+\node[box,below=of input,text width=100mm] (action) {Decode hex and check length};
+\node[box,below=of action,text width=100mm] (output) {16 raw bytes};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} A future host transport would send these bytes to firmware. This function only prepares host memory.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=12]{generated/annotated_run_block.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+12&Declare this callable and its parameters; the body runs only when called. Convert a hexadecimal input string to exactly sixteen bytes.\\
+13&Decode hexadecimal text into raw bytes; malformed hex raises ValueError instead of silently changing the input.\\
+15&Accept only one complete 128-bit block or key for this demonstration.\\
+16&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+18&Return the validated raw bytes used by the cipher and target simulator.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{LessonTerminal}}
+Format the same data as clean/faulty/XOR rows with red differences.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Two arrays of bytes};
+\node[box,below=of input,text width=100mm] (action) {Compare positions; apply ANSI colors};
+\node[box,below=of action,text width=100mm] (output) {Readable terminal and log rows};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} Only the PC display changes. Red text is a visualization of differing data, not a measured electrical pulse.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=21]{generated/annotated_run_LessonTerminal.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+21&Declare this callable and its parameters; the body runs only when called. Format the same data as clean/faulty/XOR rows with red differences.\\
+22&Define the byte-formatting method used to color differences without changing any byte values.\\
+23&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+25&Compare each faulty output byte with its reference position before choosing its color.\\
+26&Use red formatting only when this faulty byte differs from the clean reference byte.\\
+27&Prepare this changed byte with ANSI red and an immediate reset.\\
+28&The if-condition at line 26 was false; follow this alternative path rather than the preceding branch.\\
+29&Prepare an unchanged byte as ordinary two-digit hexadecimal text.\\
+31&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+33&Join the prepared hex fragments with spaces for terminal display.\\
+35&Define the clean/faulty/XOR printing method used throughout both lessons.\\
+36&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+38&Format each clean reference byte without fault coloring.\\
+39&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+41&Print the text/label "Correct:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+42&Print the text/label "Faulty:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+44&Prepare an explicit byte buffer for the following comparison or recovered-key serialization.\\
+46&Visit the aligned correct and faulty bytes in the same serialized order.\\
+47&Append their byte XOR, which is zero exactly when the two positions agree.\\
+49&Serialize the explicitly constructed difference buffer.\\
+51&Print the text/label "XOR:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{aes\_demo}}
+Run the AES round-9 lesson when AES is selected; this function is not executed by --algorithm sm4.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {AES selection only};
+\node[box,below=of input,text width=100mm] (action) {AES encryption and quartet recovery};
+\node[box,below=of action,text width=100mm] (output) {AES verification result};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} Included for complete run.py coverage. It does not contribute to SM4 recovery; all operations here remain host-side software simulation.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=54]{generated/annotated_run_aes_demo.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+54&Declare this callable and its parameters; the body runs only when called. Run the AES round-9 lesson when AES is selected; this function is not executed by --algorithm sm4.\\
+55&Load AES simulation inputs. This line belongs to the AES branch and does not supply SM4 key material.\\
+57&Print the named teaching-section boundary. This affects terminal/log organization only and does not advance the target or the solver.\\
+59&Print the text/label "Plaintext:  Key:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+60&Print the text/label "AES layout: index = 4*column + row. This execution has no fault.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+62&Use the AES trace adapter with fault\_round=9; mask zero creates the clean reference.\\
+64&Check that the trace adapter matches ordinary AES encryption before teaching its fault behavior.\\
+65&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+67&Compute AES round keys for the teacher-only normal-encryption display.\\
+69&Show each AES expanded round key in sequence.\\
+70&Print the text/label "K  =". Substitute these runtime fields: number, aes.state\_to\_bytes(round\_key).hex().upper(). This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+72&Convert the plaintext into the AES column-major matrix for initial key addition.\\
+74&Apply the initial AES K0 XOR in the teacher view.\\
+76&Print the text/label "Initial AddRoundKey:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+78&Walk the clean AES transformation snapshots in execution order.\\
+79&Exclude the adapter marker from the ordinary AES transformation display.\\
+80&Print the text/label "R   :". Substitute these runtime fields: number, operation, state.hex().upper(). This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+81&Wait for Enter only if --step is enabled. Pausing does not change a state word, create a fault or alter a candidate set.\\
+83&Print the text/label "Correct ciphertext:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+85&Print the named teaching-section boundary. This affects terminal/log organization only and does not advance the target or the solver.\\
+87&Print the text/label "Recover one K10 quartet per column; repeat across all four columns.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+88&Print the text/label "d = InvSbox[C[p] XOR k] XOR InvSbox[F[p] XOR k].". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+89&Print the text/label "Four d values must match one of 4*255 = 1020 MixColumns difference patterns.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+91&Use the two preferred initial AES masks when the observation budget allows both.\\
+92&Try AES masks 1 and 2 first, then reproducibly sample other distinct nonzero masks up to the limit.\\
+93&The if-condition at line 91 was false; follow this alternative path rather than the preceding branch.\\
+94&For a budget of one, run only the first AES mask rather than requesting extra observations.\\
+96&Prepare sixteen AES final-key bytes and a total faulty-output counter.\\
+98&Recover each of the four AES pre-ShiftRows key quartets in turn.\\
+99&Mark the byte or group as unconstrained before its first observation; an empty set would instead mean inconsistency.\\
+101&Print the text/label "COLUMN  : output/key positions". Substitute these runtime fields: column, piret\_aes.output\_positions(column). This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+103&Request distinct faults sequentially, numbering observations from one within this target byte/group.\\
+104&Run an AES round-9 byte-fault encryption for the selected column and mask.\\
+105&Count this faulty AES encryption once, independently of display stages.\\
+106&Print the text/label "Observation  : simulator XOR  , row 0 / column  .". Substitute these runtime fields: observation, mask, column. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+107&Print the text/label "The solver enumerates unknown fault rows/values and does not receive this mask.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+108&Index clean AES snapshots by round and operation for paired fault-propagation comparisons.\\
+110&Build the clean AES snapshot lookup explicitly from each recorded round and operation.\\
+111&Index the clean state by its round/operation pair for later fault-propagation comparisons.\\
+113&Visit each faulty AES transformation snapshot for the current observation.\\
+114&Display only the AES fault round and later propagation in this part of the lesson.\\
+115&Print the text/label "R". Substitute these runtime fields: number, operation. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+116&Compare the two supplied byte arrays visually, compute their XOR and color changed positions red. The data is not modified.\\
+117&Wait for Enter only if --step is enabled. Pausing does not change a state word, create a fault or alter a candidate set.\\
+119&Compare the two supplied byte arrays visually, compute their XOR and color changed positions red. The data is not modified.\\
+120&Print exhaustive AES byte guesses and shared-error quartet patterns; this branch is not used in SM4-only execution.\\
+122&Derive compatible AES K10 quartets from correct/faulty ciphertexts, not from the printed key.\\
+124&Distinguish the first observation from subsequent intersections; no previous candidate set exists yet.\\
+125&Mark the initial AES quartet history as unconstrained rather than claiming a previous finite set.\\
+126&The if-condition at line 124 was false; follow this alternative path rather than the preceding branch.\\
+127&Record the number of hypotheses remaining before applying the new observation.\\
+130&Distinguish the first observation from subsequent intersections; no previous candidate set exists yet.\\
+131&Initialize this AES quartet set directly from the first observed pair.\\
+132&The if-condition at line 130 was false; follow this alternative path rather than the preceding branch.\\
+133&Intersect the prior hypotheses with those from the new pair; never introduce a new candidate.\\
+135&Print the text/label "Candidates in this pair:  ; intersection:   ->". Substitute these runtime fields: len(fresh), before, len(survivors). This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+136&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+138&Format up to four candidates for the short summary; the earlier detailed tables remain exhaustive.\\
+139&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+141&Print the text/label "First survivors:   |". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+142&Wait for Enter only if --step is enabled. Pausing does not change a state word, create a fault or alter a candidate set.\\
+144&An empty intersection means the observations and model cannot be reconciled; do not claim a key.\\
+145&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+147&Uniqueness is the acceptance rule: one value remains compatible with all observations for this byte/group.\\
+148&Place the unique AES tuple bytes into final ciphertext/key order using inverse ShiftRows mapping.\\
+149&Store one uniquely recovered AES final-key byte at its true serialized position.\\
+151&Stop this observation loop immediately after uniqueness; do not query unused masks.\\
+152&The for-loop beginning at line 103 exhausted its observation budget without break; execute the following ambiguity result.\\
+153&Print the text/label "AES recovery remains ambiguous. Increase --observations. 31". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+154&Tell the caller that this requested lesson did not establish verified complete recovery.\\
+156&Print the named teaching-section boundary. This affects terminal/log organization only and does not advance the target or the solver.\\
+158&Print the text/label "Recovered K10:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+160&Derive AES K0 from the recovered K10 through the detailed display helper.\\
+162&Run and print recovered-key encryption/decryption consistency checks on the ordinary cipher.\\
+164&Check the AES recovered key only after recovery: ground truth and re-encryption must both agree.\\
+165&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+167&Print the text/label "32 AES MASTER KEY:   / PASS (  faulty outputs)". Substitute these runtime fields: recovered.hex().upper(), total. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+169&Return verified success to the command-line controller.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{inverse\_rows}}
+Delegate inverse-matrix construction to the SM4 attack module.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Public linear map};
+\node[box,below=of input,text width=100mm] (action) {Call piret\_sm4.inverse\_rows};
+\node[box,below=of action,text width=100mm] (output) {Cached inverse-matrix rows};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This wrapper exists on the host for compatible call sites; it does not issue a hardware operation.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=172]{generated/annotated_run_inverse_rows.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+172&Declare this callable and its parameters; the body runs only when called. Delegate inverse-matrix construction to the SM4 attack module.\\
+175&Delegate to the single cached implementation of inverse-matrix construction.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{inverse\_linear}}
+Delegate inverse diffusion to the SM4 attack module.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Observed difference};
+\node[box,below=of input,text width=100mm] (action) {Call piret\_sm4.inverse\_linear};
+\node[box,below=of action,text width=100mm] (output) {Restored S-box difference};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} Offline PC algebra; no new target encryption occurs.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=178]{generated/annotated_run_inverse_linear.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+178&Declare this callable and its parameters; the body runs only when called. Delegate inverse diffusion to the SM4 attack module.\\
+181&Delegate inverse diffusion; the wrapper introduces no new equation or target operation.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{sm4\_encrypt}}
+Delegate a clean or faulty encryption request to the software target adapter.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Plaintext, key and optional fault};
+\node[box,below=of input,text width=100mm] (action) {Call SM4 target adapter};
+\node[box,below=of action,text width=100mm] (output) {Ciphertext and trace};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This wrapper currently calls Python. A serial transport is not implemented by this function.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=184]{generated/annotated_run_sm4_encrypt.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+184&Declare this callable and its parameters; the body runs only when called. Delegate a clean or faulty encryption request to the software target adapter.\\
+187&Forward the target inputs and optional fault descriptor to the SM4 simulator, returning both output and trace.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{sm4\_byte\_candidates}}
+Delegate the known-mask byte equation to the attack module.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Restored output pair};
+\node[box,below=of input,text width=100mm] (action) {Call SM4 candidate solver};
+\node[box,below=of action,text width=100mm] (output) {Input/key guesses and difference};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This is PC analysis of outputs, not access to hidden chip state.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=190]{generated/annotated_run_sm4_byte_candidates.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+190&Declare this callable and its parameters; the body runs only when called. Delegate the known-mask byte equation to the attack module.\\
+193&Delegate ciphertext-based candidate filtering rather than duplicate it in presentation code.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{reverse\_sm4}}
+Delegate schedule inversion without duplicating its equations.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Four recovered tail keys};
+\node[box,below=of input,text width=100mm] (action) {Call inverse key expansion};
+\node[box,below=of action,text width=100mm] (output) {Original key bytes};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} The host derives key material mathematically after the fault observations.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=196]{generated/annotated_run_reverse_sm4.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+196&Declare this callable and its parameters; the body runs only when called. Delegate schedule inversion without duplicating its equations.\\
+199&Delegate schedule reversal, forwarding the optional explanatory callback.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{show\_sm4\_peeling}}
+Explain every reverse round numerically for a correct or faulty output.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Ciphertext and recovered later keys};
+\node[box,below=of input,text width=100mm] (action) {Print each reconstructed older word};
+\node[box,below=of action,text width=100mm] (output) {Detailed peeling explanation};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This reconstructs a software view on the PC. It is not a live trace of past target registers.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=202]{generated/annotated_run_show_sm4_peeling.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+202&Declare this callable and its parameters; the body runs only when called. Explain every reverse round numerically for a correct or faulty output.\\
+205&Start the explanatory peeling pass from the measured final ciphertext.\\
+208&Undo only rounds later than the requested target round, newest first.\\
+209&Restore chronological word order for the current reverse-round explanation.\\
+211&Use the already recovered subkey corresponding to the later round being undone.\\
+213&Form that round's S-box input from the three newest surviving words and its recovered key.\\
+215&Substitute the four reconstructed input bytes using the public SM4 S-box.\\
+217&Apply encryption diffusion L to the substituted value for the reverse-round equation.\\
+220&Ask the actual attack helper for the restored view, so the explanatory pass cannot silently use different reversal logic.\\
+222&Read the newly reconstructed oldest word from the last word of the ciphertext-style restored view.\\
+224&Print the text/label "Undo round   with recovered rk =". Substitute these runtime fields: number, number, round\_key. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+225&Print the text/label "A =   XOR   XOR   XOR   =". Substitute these runtime fields: words[0], words[1], words[2], round\_key, value. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+226&Print the text/label "tau(A) =  ; L(tau(A)) =". Substitute these runtime fields: substituted, diffused. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+227&Print the text/label "X  = X  XOR L(tau(A)) =   XOR   =". Substitute these runtime fields: number, number + 4, words[3], diffused, previous. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+228&Print the text/label "Restored output view:". Substitute these runtime fields: view.hex().upper(). This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{show\_sm4\_key\_schedule}}
+Produce and print detailed SM4 inverse-schedule teaching events.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {DFA-recovered tail keys};
+\node[box,below=of input,text width=100mm] (action) {Explain all reverse words and FK removal};
+\node[box,below=of action,text width=100mm] (output) {Master key and printed derivation};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This display may repeat an already completed inverse schedule. That repetition does not collect additional faults.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=231]{generated/annotated_run_show_sm4_key_schedule.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+231&Declare this callable and its parameters; the body runs only when called. Produce and print detailed SM4 inverse-schedule teaching events.\\
+234&Build all numerical inverse-schedule events and the resulting SM4 master key from recovered tail keys.\\
+236&Print the numerical teaching events already generated by the schedule helper. This is explanatory replay, not additional fault collection.\\
+238&Return the master-key bytes produced by the explained inverse schedule.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{show\_sm4\_observation}}
+Explain one observation, its inverse-L calculation, its candidates and its uniqueness status.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Solver event and previous sets};
+\node[box,below=of input,text width=100mm] (action) {Render equations and intersections};
+\node[box,below=of action,text width=100mm] (output) {Recovered-byte/round-key summaries};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} The event contains measurements and reconstructed values. Teacher traces and hidden states must not be confused with the solver inputs.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=241]{generated/annotated_run_show_sm4_observation.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+241&Declare this callable and its parameters; the body runs only when called. Explain one observation, its inverse-L calculation, its candidates and its uniqueness status.\\
+244&Read the selected target round and byte from the completed solver observation.\\
+247&Use a compound dictionary key so candidate history for one byte cannot contaminate another round or position.\\
+249&Print every detailed stage for this observation: restored views, inverse-L contributions, candidate tests and intersection. The previous display set is passed only for explanation.\\
+251&Remember the current candidate set for the next detailed intersection display; this does not change the solver.\\
+253&Print the round-level introduction only for the first observation of the first displayed byte.\\
+254&Print the named teaching-section boundary. This affects terminal/log organization only and does not advance the target or the solver.\\
+256&The actual last round requires no peeling; earlier target rounds must remove later rounds first.\\
+257&Print the text/label "Round 31 is already last; no round needs to be undone.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+258&The if-condition at line 256 was false; follow this alternative path rather than the preceding branch.\\
+259&Prepare the decoded recovered-key dictionary for the explanatory peeling pass.\\
+261&Decode each already recovered later key carried by the event.\\
+262&Convert string indices and hexadecimal key labels back to integers for the display calculation.\\
+264&Print the text/label "Restore the target round using ONLY previously recovered later subkeys.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+265&Print the text/label "Correct execution:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+266&Explain correct or faulty round peeling separately; these reconstructed views remain offline host values.\\
+267&Print the text/label "Faulty execution (a NEW fault at the target round):". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+268&Explain correct or faulty round peeling separately; these reconstructed views remain offline host values.\\
+270&Print the text/label "Round  , byte  , observation  , mask  round byte observation mask". Substitute these runtime fields: event['round'], event['byte'], event['observation'], event['mask']. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+272&Compare the two supplied byte arrays visually, compute their XOR and color changed positions red. The data is not modified.\\
+274&Print the text/label "Undo later rounds using ONLY previously recovered subkeys:  peeled\_with". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+276&Compare the two supplied byte arrays visually, compute their XOR and color changed positions red. The data is not modified.\\
+279&Decode the clean restored output view into four big-endian words for the explanatory equations.\\
+281&Decode the corresponding faulty restored output with exactly the same layout.\\
+283&Map byte 0,1,2,3 to bit shifts 24,16,8,0 in a big-endian 32-bit word.\\
+285&Recompute q from public restored words for the displayed key-byte conversion.\\
+287&Select the target byte of the already computed S-box output difference.\\
+289&Print the text/label "DeltaX =   XOR   =". Substitute these runtime fields: clean\_words[0], faulty\_words[0], clean\_words[0] \textasciicircum{} faulty\_words[0]. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+290&Print the text/label "DeltaB = L-inverse(DeltaX) =  ; selected byte difference =  delta\_b". Substitute these runtime fields: event['delta\_b'], delta. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+291&Print the text/label "Known byte q = byte   of (X  XOR X  XOR X ) =". Substitute these runtime fields: byte, number + 1, number + 2, number + 3, known. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+294&Unknown-bit Giraud must test every one-bit mask. The default controlled-byte demonstration instead knows its mask.\\
+295&List the eight possible single-bit errors without revealing which simulator bit was actually selected.\\
+297&Print the text/label "UNKNOWN-BIT FILTER: the simulator mask above is NOT given to the candidate solver.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+298&The if-condition at line 294 was false; follow this alternative path rather than the preceding branch.\\
+299&Use the exact known error for the controlled-byte or explicitly known-bit model.\\
+301&Print the text/label "KNOWN-MASK FILTER: the exact error is given to the candidate solver.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+303&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+305&Visit each value of the displayed allowed-error, survivor or recovered-byte sequence explicitly.\\
+306&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+308&Print the text/label "Allowed input errors:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+309&Print the text/label "Test a=00..FF: at least one allowed e must satisfy S(a) XOR S(a XOR e) =  .". Substitute these runtime fields: delta. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+311&Explain every compatible S-box input that survived the current pair equation.\\
+312&Start without a compatible error witness; the explicit search must find one.\\
+314&Test each error permitted by the selected known-mask or unknown-bit model.\\
+315&Construct the corresponding faulty S-box input for this candidate and error.\\
+316&Calculate the predicted S-box difference for this error witness.\\
+318&Accept the error witness only if it matches the observed byte difference.\\
+319&Remember this compatible error before stopping the witness search.\\
+320&Stop the permitted-error search once one compatible witness is found.\\
+322&Report the impossible-witness condition rather than inventing an error value.\\
+323&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+325&Reconstruct the corresponding faulty S-box input for this compatible hypothesis.\\
+327&Print the text/label "a= , compatible e= : S[ ] XOR S[ ] =   XOR   =  ; rk byte = a XOR q =   XOR   =". Substitute these runtime fields: candidate, error, candidate, changed, sm4.SBOX[candidate], sm4.SBOX[changed], delta, candidate, known, candidate \textasciicircum{} known. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+329&Print the text/label "L-inverse difference:  ; candidates   ->  delta\_b before remaining". Substitute these runtime fields: event['delta\_b'], event['before'], event['remaining']. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+331&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+333&Visit each value of the displayed allowed-error, survivor or recovered-byte sequence explicitly.\\
+334&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+336&Print the text/label "Survivors:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+338&Only print a recovered-byte declaration when the accumulated intersection has exactly one value.\\
+339&Read that unique key-byte value from the sorted event list.\\
+342&Maintain a per-round collection of uniquely recovered bytes for final round-key assembly.\\
+344&Print the text/label "32 RECOVERED rk  byte   =   / UNIQUE". Substitute these runtime fields: number, byte, value. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+346&Wait until all four byte positions are known before claiming a complete 32-bit subkey.\\
+347&Prepare an explicit byte buffer for the following comparison or recovered-key serialization.\\
+349&Visit the four recovered byte positions in big-endian order.\\
+350&Add the uniquely recovered byte at this position to the round-key buffer.\\
+352&Serialize all four recovered bytes into the assembled round-key view.\\
+353&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+355&Visit each value of the displayed allowed-error, survivor or recovered-byte sequence explicitly.\\
+356&Accumulate or append the explicitly formatted hexadecimal display fragments; this does not modify cipher data.\\
+358&Print the text/label "Assemble bytes in big-endian order:   ||". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+359&Print the text/label "1;32 DFA ASSEMBLED rk  =". Substitute these runtime fields: number, ordered.hex().upper(). This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+361&Wait for Enter only if --step is enabled. Pausing does not change a state word, create a fault or alter a candidate set.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{show\_aes\_key\_schedule}}
+Print the AES inverse schedule; this path is inactive in the SM4 demonstration.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Recovered AES K10};
+\node[box,below=of input,text width=100mm] (action) {Derive AES schedule events};
+\node[box,below=of action,text width=100mm] (output) {AES K0};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} Included only because it is a function in run.py. The SM4 path instead uses show\_sm4\_key\_schedule.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=364]{generated/annotated_run_show_aes_key_schedule.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+364&Declare this callable and its parameters; the body runs only when called. Print the AES inverse schedule; this path is inactive in the SM4 demonstration.\\
+367&Build AES-specific inverse-schedule teaching events; this function is inactive for SM4-only execution.\\
+369&Print the numerical teaching events already generated by the schedule helper. This is explanatory replay, not additional fault collection.\\
+371&Return the master-key bytes produced by the explained inverse schedule.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{sm4\_demo}}
+Build the clean reference, define target/report callbacks, recover the key and validate the result.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Configured SM4 inputs};
+\node[box,below=of input,text width=100mm] (action) {Clean run; faults; recovery; checks};
+\node[box,below=of action,text width=100mm] (output) {Printed SM4 result and boolean success};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} This is the host experiment controller. In a board experiment the oracle would need a real transport and glitch campaign instead of the present Python target adapter.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=374]{generated/annotated_run_sm4_demo.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+374&Declare this callable and its parameters; the body runs only when called. Build the clean reference, define target/report callbacks, recover the key and validate the result.\\
+377&Read and validate the configured target key and plaintext for simulation. The solver does not receive the key.\\
+379&Run a clean reference encryption with no fault selected and retain teacher-only round records.\\
+381&Print the named teaching-section boundary. This affects terminal/log organization only and does not advance the target or the solver.\\
+383&Print each of the thirty-two clean encryption-round records in order.\\
+384&Print the text/label "Round  : A=  B=  L(B)=  new= round a b linear new". Substitute these runtime fields: item['round'], item['a'], item['b'], item['linear'], item['new']. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+386&Wait for Enter only if --step is enabled. Pausing does not change a state word, create a fault or alter a candidate set.\\
+388&Print the text/label "Ciphertext:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+390&Print the named teaching-section boundary. This affects terminal/log organization only and does not advance the target or the solver.\\
+392&Print the text/label "Controlled faults in EACH final round are required. No reference subkeys are supplied.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+393&Print the text/label "For each byte: undo L, test S(a) XOR S(a XOR mask), then convert a to a subkey guess.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+394&Print the text/label "Repeat independent faults and intersect guesses. Only one survivor identifies a byte.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+396&Start presentation-only histories for candidate sets and uniquely recovered round-key bytes.\\
+399&Define a target-query callback closing over the plaintext and simulated secret key. Its public result is only a ciphertext.\\
+400&Perform one new target encryption with the selected fault. The detailed trace is for teaching, not solving.\\
+402&Print teacher-only fault propagation from the target trace. This exposes intermediate values for learning, but none are returned as solver inputs.\\
+404&Give the attacker only the target ciphertext; do not return its trace or target key.\\
+406&Define the presentation callback invoked after each solver observation; it does not generate faults or choose candidates.\\
+407&Render a solver event without taking control of its candidate computation.\\
+409&Run full output-based SM4 recovery with mask budget 1..limit, selected starting byte and a reporting callback.\\
+411&Detect an observation budget exhausted before full uniqueness; do not continue to a claimed master key.\\
+412&Print the text/label "SM4 recovery remains ambiguous. Increase --observations.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+414&Tell the caller that this requested lesson did not establish verified complete recovery.\\
+416&Summarize only the four subkeys actually recovered through fault observations.\\
+417&Print the text/label "32 DFA RECOVERED rk  =   / PASS". Substitute these runtime fields: number, value. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+419&Repeat inverse expansion through the detailed teaching view and retain its reconstructed master key.\\
+421&Cross-check the detailed display's inverse schedule against the recovery engine's result.\\
+422&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+424&Run and print recovered-key encryption/decryption consistency checks on the ordinary cipher.\\
+426&Re-encrypt the known plaintext with the recovered key using the ordinary SM4 cipher.\\
+428&Validate both simulation ground-truth equality and the original correct ciphertext, only after recovery.\\
+429&Stop this path with the stated exception. The message identifies the violated input, model or verification condition; no recovered key is accepted by this line.\\
+431&Print the named teaching-section boundary. This affects terminal/log organization only and does not advance the target or the solver.\\
+433&Print the text/label "Plaintext:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+434&Print the text/label "Expected ciphertext:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+435&Print the text/label "Recovered-key ciphertext:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+436&Print the text/label "32  / PASS SM4 MASTER KEY:". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+437&Print the text/label "faulty outputs. All four subkeys came from DFA, not references. used". Substitute these runtime fields: result['used']. This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+439&Return verified success to the command-line controller.\\
+\bottomrule\end{longtable}\endgroup
+\section{\texttt{main}}
+Choose AES, SM4 or both and aggregate their exit status.
+\begin{center}\begin{tikzpicture}[node distance=4mm]
+\node[box,text width=100mm] (input) {Command-line arguments};
+\node[box,below=of input,text width=100mm] (action) {Validate configuration; select lessons};
+\node[box,below=of action,text width=100mm] (output) {Process success/ambiguity code};
+\draw[flow](input)--(action);\draw[flow](action)--(output);
+\end{tikzpicture}\end{center}
+\remember{\textbf{Physical interpretation:} All selection, printing and log handling runs on the PC. --algorithm sm4 skips the AES lesson, although configuration validation checks both modules.}
+\subsection*{Exact source}
+\VerbatimInput[firstnumber=442]{generated/annotated_run_main.txt}
+\subsection*{Read each executable line}
+\begingroup\small\begin{longtable}{r >{\raggedright\arraybackslash}p{138mm}}\toprule Line&Meaning and effect\\\midrule\endfirsthead\toprule Line&Meaning and effect\\\midrule\endhead
+442&Declare this callable and its parameters; the body runs only when called. Choose AES, SM4 or both and aggregate their exit status.\\
+443&Create the command-line option parser using the module description for help text.\\
+445&Register --algorithm. Select the allowed cipher branch for this entry point.\\
+446&Register --step. Enable pauses at teaching boundaries.\\
+447&Register --color. Select automatic, forced or disabled ANSI colors.\\
+448&Register --observations. Set the per-byte or per-column observation budget.\\
+449&Register --seed. Used for AES mask sampling in run.py; not used for SM4 mask order.\\
+451&Decode the supplied argument list (or process command line) and enforce the declared argument types and choices.\\
+453&Reject an observation budget outside 1..255 before requesting any faulty outputs.\\
+454&Report invalid configuration and terminate argument processing rather than starting an invalid experiment.\\
+456&Begin a protected configuration-validation block; the associated except path turns invalid input into a parser error.\\
+457&Validate both cipher configurations even if just one lesson was requested; this is configuration checking, not AES execution.\\
+458&Require this configured key or plaintext to decode as a complete block.\\
+459&Catch the named validation exception and report its message through the command-line parser.\\
+460&Report invalid configuration and terminate argument processing rather than starting an invalid experiment.\\
+462&Configure presentation colors and optional pauses; these choices do not affect the cryptographic equations.\\
+464&Print the text/label "AES\_SM4\_DFA.pdf / chapters 2-6 / software demonstration". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+465&Print the text/label "RED marks bytes changed by the injected fault, including propagated changes.". This is presentation output, also mirrored to the active log; it performs no target query and changes no candidates.\\
+468&Collect independent success flags for the requested algorithm demonstrations.\\
+470&Execute the AES branch only when requested. It is skipped by --algorithm sm4.\\
+471&Run the AES lesson and store its success flag; not executed in the SM4-only command.\\
+473&Execute the SM4 demonstration for either an explicit SM4 selection or the combined default.\\
+474&Run the SM4 lesson with its observation budget and store whether full recovery verified.\\
+476&Check the already collected success flags for all requested algorithm demonstrations.\\
+477&Select process success because all requested demonstrations verified.\\
+478&The if-condition at line 476 was false; follow this alternative path rather than the preceding branch.\\
+479&Select process ambiguity status because a requested demonstration did not fully recover its key.\\
+481&Return the word assembled from all thirty-two inverse-row parity calculations.\\
+\bottomrule\end{longtable}\endgroup

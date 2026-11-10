@@ -1,0 +1,18 @@
+def show_sm4_peeling(terminal, ciphertext, target_round, recovered_keys):
+    """Explain restored words using only subkeys already recovered by DFA."""
+    view = ciphertext
+    # Undo later rounds in reverse order so the target becomes the restored final round.
+    for number in range(31, target_round, -1):
+        words = struct.unpack(">4I", view)[::-1]
+        round_key = recovered_keys[number]
+        value = words[0] ^ words[1] ^ words[2] ^ round_key
+        substituted = sm4.sbox(value)
+        diffused = sm4.linear(substituted)
+        # The attack engine performs the actual reversal; this helper explains it.
+        view = piret_sm4.peel_sm4(ciphertext, number-1, recovered_keys)
+        previous = struct.unpack(">4I", view)[-1]
+        print(f"  Undo round {number} with recovered rk{number}={round_key:08X}")
+        print(f"    A = {words[0]:08X} XOR {words[1]:08X} XOR {words[2]:08X} XOR {round_key:08X} = {value:08X}")
+        print(f"    tau(A) = {substituted:08X}; L(tau(A)) = {diffused:08X}")
+        print(f"    X{number} = X{number+4} XOR L(tau(A)) = {words[3]:08X} XOR {diffused:08X} = {previous:08X}")
+        print(f"    Restored output view: {view.hex().upper()}")

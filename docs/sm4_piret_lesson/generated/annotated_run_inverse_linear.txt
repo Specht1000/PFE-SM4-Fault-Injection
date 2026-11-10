@@ -1,0 +1,4 @@
+def inverse_linear(value):
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+
+    return piret_sm4.inverse_linear(value)

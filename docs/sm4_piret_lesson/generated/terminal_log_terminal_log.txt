@@ -1,0 +1,34 @@
+@contextmanager
+def terminal_log(name, folder=None):
+    """Capture stdout and stderr; importing a cipher never creates a log."""
+
+    if folder is None:
+        directory = LOG_FOLDER
+    else:
+        directory = Path(folder)
+
+    directory.mkdir(parents=True, exist_ok=True)
+
+    # Remove only this program's old timestamped logs from the previous format.
+    legacy_name = re.compile(re.escape(name) + r"_\d{8}T\d{6}_\d{6}Z\.(txt|html)")
+
+    for previous in directory.iterdir():
+        if previous.is_file() and legacy_name.fullmatch(previous.name):
+            previous.unlink()
+
+    path = directory / f"{name}.txt"
+
+    path.with_suffix(".html").write_text(colored_html(""), encoding="utf-8")
+
+    # Opening in write mode replaces this program's previous run rather than appending.
+    with path.open("w", encoding="utf-8") as output:
+        try:
+            # Capture stderr too, including tracebacks, while preserving live terminal output.
+            with redirect_stdout(Tee(sys.stdout, output)), redirect_stderr(Tee(sys.stderr, output)):
+                print(f"Log file: {path}")
+                print(f"Colored HTML log: {path.with_suffix('.html')}")
+                yield path
+        # Finalize the browser-readable HTML even after an exception or interruption.
+        finally:
+            output.flush()
+            path.with_suffix(".html").write_text(colored_html(path.read_text(encoding="utf-8")), encoding="utf-8")

@@ -19,20 +19,39 @@ if GUI:
 class CryptoTests(unittest.TestCase):
     def test_direct_sm4_block_api_is_quiet(self):
         from contextlib import redirect_stdout
+
         import io
+
         rng = random.Random(32)
+
         for _ in range(8):
-            key, block = (bytes(rng.randrange(256) for _ in range(16)) for _ in range(2))
+            computed_value_values = []
+
+            for unused_index in range(2):
+                byte_values = []
+
+                for input in range(16):
+                    byte_values.append(rng.randrange(256))
+
+                computed_value_values.append(bytes(byte_values))
+
+            key, block = computed_value_values
+
             with redirect_stdout(io.StringIO()):
                 ciphertext = lab.sm4.sm4_encrypt_block(block, key)
+
             output = io.StringIO()
+
             with redirect_stdout(output):
                 recovered = lab.sm4.sm4_decrypt_block(ciphertext, key)
+
             self.assertEqual(recovered, block)
             self.assertEqual(ciphertext, lab.sm4_trace(block, key)[0])
             self.assertEqual(output.getvalue(), "")
+
         with self.assertRaises(ValueError):
             lab.sm4.key_expansion(b"short")
+
         with self.assertRaises(ValueError):
             lab.sm4.sm4_encrypt_block(b"short", bytes(16))
 
@@ -46,26 +65,44 @@ class CryptoTests(unittest.TestCase):
 
     def test_independent_openssl(self):
         openssl = shutil.which("openssl") or "C:/Program Files/Git/usr/bin/openssl.exe"
+
         if not Path(openssl).is_file():
             self.skipTest("OpenSSL unavailable")
+
         rng = random.Random(2026)
+
         for name, function in [("aes-128-ecb", lab.aes_trace), ("sm4-ecb", lab.sm4_trace)]:
             for _ in range(12):
-                key, block = (bytes(rng.randrange(256) for _ in range(16)) for _ in range(2))
+                computed_value_values = []
+
+                for unused_index in range(2):
+                    byte_values = []
+
+                    for candidate_input in range(16):
+                        byte_values.append(rng.randrange(256))
+
+                    computed_value_values.append(bytes(byte_values))
+
+                key, block = computed_value_values
                 expected = subprocess.check_output([openssl, "enc", "-" + name, "-K", key.hex(), "-nopad"], input=block)
                 self.assertEqual(function(block, key)[0], expected)
                 self.assertEqual(function(expected, key, True)[0], block)
 
     def test_piret_positions_and_ambiguity(self):
         key, block = bytes.fromhex(lab.AES_KEY), bytes.fromhex(lab.AES_INPUT)
+
         for row in range(4):
             for column in range(4):
                 report = lab.piret_lesson(block, key, row, column, 17 + row + column, 6)
                 self.assertEqual(report["recovered_key"], lab.AES_KEY)
                 self.assertTrue(report["verified"])
+
         report = lab.piret_lesson(block, key, 0, 0, 1, 1)
+
         self.assertIsNone(report["recovered_key"])
+
         self.assertFalse(report["verified"])
+
         with self.assertRaises(ValueError):
             lab.recover_key(block, [block])
 
@@ -76,31 +113,53 @@ class CryptoTests(unittest.TestCase):
 
     def test_pdf_gui_attack_models(self):
         key, block = bytes.fromhex(lab.AES_KEY), bytes.fromhex(lab.AES_INPUT)
+
         result = lab.pdf_aes_lesson(block, key, 0, 0, 1, 6)
+
         self.assertTrue(result["verified"])
+
         self.assertEqual(result["recovered_key"], key.hex())
+
         self.assertIn("round-9", result["model"])
+
         key = bytes.fromhex(lab.SM4_VECTOR)
+
         result = lab.pdf_sm4_lesson(key, key, 0, 1, 6)
+
         self.assertTrue(result["verified"])
+
         self.assertEqual(result["recovered_subkey"], "9124A012")
+
         self.assertEqual(result["recovered_key"], key.hex())
+
         self.assertEqual(set(result["recovered_round_keys"]), {"28", "29", "30", "31"})
+
         self.assertNotIn("reference_subkeys", result)
+
         result = lab.pdf_sm4_lesson(key, key, 0, 1, 1)
+
         self.assertFalse(result["verified"])
+
         self.assertIsNone(result["recovered_subkey"])
 
     @unittest.skipUnless(GUI, "Use --gui for Tk integration checks")
     def test_gui(self):
         from unittest.mock import patch
+
         import tempfile
+
         import json
+
         root = lab.tk.Tk()
+
         root.withdraw()
+
         app = lab.CryptoLab(root)
+
         errors = []
+
         root.report_callback_exception = lambda *args: errors.append(args)
+
         try:
             for algorithm, operation in [("AES-128", "Encrypt"), ("AES-128", "Decrypt"), ("SM4", "Encrypt"), ("SM4", "Decrypt"), ("AES-128", "Fault analysis"), ("SM4", "Fault analysis"), ("AES-128", "Giraud attack"), ("SM4", "Giraud attack")]:
                 app.algorithm.set(algorithm)
@@ -108,13 +167,17 @@ class CryptoTests(unittest.TestCase):
                 app.load_example()
                 app.run()
                 deadline = time.monotonic() + 10
+
                 while app.busy and time.monotonic() < deadline:
                     root.update()
                     time.sleep(0.01)
+
                 self.assertFalse(app.busy)
                 self.assertTrue(app.report["verified"])
+
                 for index in range(len(app.report["steps"])):
                     app.select(index)
+
                 app.select(0)
                 app.play()
                 self.assertIsNotNone(app.timer)
@@ -122,19 +185,25 @@ class CryptoTests(unittest.TestCase):
                 self.assertIsNone(app.timer)
                 root.update()
                 self.assertFalse(errors)
+
             with tempfile.TemporaryDirectory() as folder:
                 target = str(Path(folder) / "report.json")
+
                 with patch.object(lab.filedialog, "asksaveasfilename", return_value=target):
                     app.export()
+
                 self.assertEqual(json.loads(Path(target).read_text())["recovered_subkey"], "9124A012")
+
             app.algorithm.set("SM4")
             self.assertEqual(app.operation.get(), "Giraud attack")
             app.known_bit.set(True)
             app.run()
             deadline = time.monotonic() + 10
+
             while app.busy and time.monotonic() < deadline:
                 root.update()
                 time.sleep(0.01)
+
             self.assertTrue(app.report["known_bit"])
             self.assertTrue(app.report["verified"])
         finally:

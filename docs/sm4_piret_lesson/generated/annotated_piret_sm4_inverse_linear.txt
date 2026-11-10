@@ -1,0 +1,15 @@
+def inverse_linear(value):
+    # AND selects input bits used by each inverse-matrix row. Their parity is
+    # the GF(2) dot product; shift that one-bit result into its output position.
+    result = 0
+
+    for index, row in enumerate(inverse_rows()):
+        selected_bits = row & value
+
+        set_bit_count = bin(selected_bits).count("1")
+
+        parity = set_bit_count & 1
+
+        result |= parity << index
+
+    return result

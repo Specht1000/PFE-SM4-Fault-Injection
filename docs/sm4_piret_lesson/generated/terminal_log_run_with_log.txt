@@ -1,0 +1,23 @@
+def run_with_log(main, name):
+    """Save normal output, interrupted lessons and unexpected error details."""
+
+    with terminal_log(name):
+        try:
+            # Keep logging active throughout the executable's main function, including a GUI session.
+            code = main()
+        # Treat Ctrl+C and a closed input stream as an interrupted lesson, with a recorded exit code.
+        except (KeyboardInterrupt, EOFError):
+            print("\nLesson stopped.")
+            code = 130
+        except Exception:
+            traceback.print_exc()
+            code = 1
+
+        if code is None:
+            code = 0
+        else:
+            code = code
+
+        print(f"Exit status: {code}")
+
+        return code

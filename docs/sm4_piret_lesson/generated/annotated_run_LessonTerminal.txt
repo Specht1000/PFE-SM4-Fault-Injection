@@ -1,0 +1,31 @@
+class LessonTerminal(piret_aes.Terminal):
+    def changed(self, original, faulty):
+        formatted_values = []
+
+        for index, value in enumerate(faulty):
+            if value != original[index]:
+                element_value = self.paint(f'{value:02X}', '31')
+            else:
+                element_value = f'{value:02X}'
+
+            formatted_values.append(element_value)
+
+        return ' '.join(formatted_values)
+
+    def pair(self, correct, faulty):
+        formatted_values = []
+
+        for byte_2 in correct:
+            formatted_values.append(f'{byte_2:02X}')
+
+        print('Correct: ' + ' '.join(formatted_values))
+        print("Faulty:  " + self.changed(correct, faulty))
+
+        byte_values = []
+
+        for input_value, byte in zip(correct, faulty):
+            byte_values.append(input_value ^ byte)
+
+        delta = bytes(byte_values)
+
+        print("XOR:     " + self.changed(bytes(len(delta)), delta))

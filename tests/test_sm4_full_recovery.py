@@ -19,13 +19,31 @@ import giraud_sm4
 class FullSM4Tests(unittest.TestCase):
     def test_random_keys_without_reference_schedule_access(self):
         rng = random.Random(128)
+
         masks = set(range(1, 9)) | set(giraud_aes.SINGLE_BITS)
+
         for _ in range(8):
-            key, plaintext = (bytes(rng.randrange(256) for _ in range(16)) for _ in range(2))
+            computed_value_values = []
+
+            for unused_index in range(2):
+                byte_values = []
+
+                for candidate_input in range(16):
+                    byte_values.append(rng.randrange(256))
+
+                computed_value_values.append(bytes(byte_values))
+
+            key, plaintext = computed_value_values
             correct = sm4.sm4_encrypt_block(plaintext, key)
             truth = sm4.key_expansion(key)
             # Prepare an opaque oracle: the solver sees output bytes only.
-            outputs = {(r,b,m): piret_sm4.sm4_fault_encrypt(plaintext,key,b,m,r)[0] for r in range(28,32) for b in range(4) for m in masks}
+            outputs = {}
+
+            for row_3 in range(28, 32):
+                for candidate_byte in range(4):
+                    for m in masks:
+                        outputs[row_3, candidate_byte, m] = piret_sm4.sm4_fault_encrypt(plaintext, key, candidate_byte, m, row_3)[0]
+
 
             def oracle(number, byte, mask):
                 return outputs[number, byte, mask]
@@ -33,35 +51,62 @@ class FullSM4Tests(unittest.TestCase):
             for attack, options in [(piret_sm4, {}), (giraud_sm4, {}), (giraud_sm4, dict(known_bit=True))]:
                 with patch.object(sm4, "key_expansion", side_effect=AssertionError("Solver must not read a reference schedule")):
                     result = attack.recover_sm4_master_key(correct, oracle, **options)
+
                 self.assertTrue(result['complete'])
                 self.assertEqual(result['master_key'], key)
-                self.assertEqual(result['round_keys'], {r: truth[r] for r in range(31,27,-1)})
+                element_values = {}
+
+                for row_2 in range(31, 27, -1):
+                    element_values[row_2] = truth[row_2]
+
+                self.assertEqual(result['round_keys'], element_values)
                 self.assertEqual(sm4.sm4_encrypt_block(plaintext,result['master_key']),correct)
+
                 for event in result['history']:
-                    expected_later = {str(r) for r in range(31,event['round'],-1)}
+                    expected_later = set()
+
+                    for row in range(31, event['round'], -1):
+                        expected_later.add(str(row))
+
                     self.assertEqual(set(event['peeled_with']),expected_later)
                     self.assertGreaterEqual(event['before'],event['remaining'])
 
     def test_peeling_matches_actual_round_states(self):
         key = bytes.fromhex(sm4.KEY)
+
         plaintext = bytes.fromhex(sm4.PLAINTEXT)
+
         states = {}
 
         def record(number, operation, value):
             if operation == 'State output':
-                states[number] = b''.join(v.to_bytes(4,'big') for v in value[::-1])
+                formatted_values = []
+
+                for candidate_value in value[::-1]:
+                    formatted_values.append(candidate_value.to_bytes(4, 'big'))
+
+                states[number] = b''.join(formatted_values)
 
         ciphertext = sm4.sm4_encrypt_block(plaintext,key,observer=record)
+
         truth = sm4.key_expansion(key)
+
         for number in range(28,32):
-            later = {r: truth[r] for r in range(number+1,32)}
+            later = {}
+
+            for row in range(number + 1, 32):
+                later[row] = truth[row]
+
             self.assertEqual(piret_sm4.peel_sm4(ciphertext,number,later),states[number])
+
         with self.assertRaises(ValueError):
             piret_sm4.peel_sm4(ciphertext,28,{})
 
     def test_ambiguity_stops_before_using_an_unknown_subkey(self):
         key = bytes.fromhex(sm4.KEY)
+
         correct = sm4.sm4_encrypt_block(key,key)
+
         queries = []
 
         def oracle(number, byte, mask):
@@ -69,41 +114,70 @@ class FullSM4Tests(unittest.TestCase):
             return piret_sm4.sm4_fault_encrypt(key,key,byte,mask,number)[0]
 
         result = piret_sm4.recover_sm4_master_key(correct,oracle,masks=(1,))
+
         self.assertFalse(result['complete'])
+
         self.assertIsNone(result['master_key'])
+
         self.assertEqual(result['round_keys'],{})
+
         self.assertEqual(set(queries),{31})
+
         with self.assertRaises(ValueError):
             piret_sm4.recover_sm4_master_key(correct,lambda r,b,m: correct)
 
     def test_terminal_entry_points(self):
         for entry, arguments in [(piret_sm4.main, ['--algorithm','sm4','--color','never']), (giraud_sm4.main,['--algorithm','sm4','--color','never'])]:
             output = io.StringIO()
+
             with redirect_stdout(output):
                 self.assertEqual(entry(arguments),0)
+
             self.assertIn(sm4.KEY.upper(),output.getvalue())
 
     def test_terminal_explains_each_recovered_and_derived_subkey(self):
         import re
+
         output = io.StringIO()
+
         with redirect_stdout(output):
             self.assertEqual(piret_sm4.main(['--algorithm', 'sm4', '--color', 'never']), 0)
+
         text = output.getvalue()
+
         truth = sm4.key_expansion(bytes.fromhex(sm4.KEY))
-        derived = {int(index): int(value, 16) for index, value in re.findall(r'DERIVED rk(\d+) = ([0-9A-F]{8})', text)}
-        self.assertEqual(derived, {index: truth[index] for index in range(28)})
+
+        derived = {}
+
+        for candidate_index_2, value in re.findall('DERIVED rk(\\d+) = ([0-9A-F]{8})', text):
+            derived[int(candidate_index_2)] = int(value, 16)
+
+        element_values = {}
+
+        for candidate_index in range(28):
+            element_values[candidate_index] = truth[candidate_index]
+
+        self.assertEqual(derived, element_values)
+
         for number in range(31, 27, -1):
             self.assertIn(f'DFA ASSEMBLED rk{number} = {truth[number]:08X}', text)
             self.assertEqual(len(re.findall(f'RECOVERED rk{number} byte [0-3] =', text)), 4)
+
         # Check every printed reverse-schedule equation, not just its headings.
         equations = re.findall(r'K\[(\d+)\] = K\[\d+\] XOR L\x27\(tau\(U\)\) = ([0-9A-F]{8}) XOR ([0-9A-F]{8}) = ([0-9A-F]{8})', text)
+
         self.assertEqual(len(equations), 32)
+
         for _, current, transformed, previous in equations:
             self.assertEqual(int(current, 16) ^ int(transformed, 16), int(previous, 16))
+
         for index, word in enumerate(struct.unpack('>4I', bytes.fromhex(sm4.KEY))):
             self.assertRegex(text, rf'MK\[{index}\] = K\[{index}\] XOR FK\[{index}\] = [0-9A-F]{{8}} XOR [0-9A-F]{{8}} = {word:08X}')
+
         self.assertIn('Undo round 31 with recovered rk31=', text)
+
         self.assertIn('Restored output view:', text)
+
         self.assertIn('Recovered-key ciphertext: 681EDF34D206965E86B3E94F536E4246', text)
 
 

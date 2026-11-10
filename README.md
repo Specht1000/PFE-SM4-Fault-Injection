@@ -128,6 +128,23 @@ the slider, the step selector or automatic playback.
 
 ## Fault models and recovery scope
 
+### Focused SM4 comparison
+
+Run a paired comparison of controlled SM4 DFA and the Giraud-inspired models:
+
+```powershell
+python analysis/compare_sm4_attacks.py --trials 100 --seed 20261110
+```
+
+Results are saved in `analysis/results/sm4_comparison/`: an English report,
+raw observations, CSV tables, PNG/SVG figures and `comparison.pdf`. The command
+also writes `logs/compare_sm4_attacks.txt` and its colored HTML counterpart.
+Plotting requires Matplotlib. The comparison includes a matched-mask control:
+known-mask Piret and known-bit Giraud must produce identical candidate histories
+on identical single-bit observations. Unknown-bit filtering is evaluated
+separately. Timings measure offline host recovery with cached target outputs;
+they exclude physical acquisition and target encryption.
+
 ### Code responsibilities
 
 - `aes.py` and `sm4.py` implement normal encryption/decryption. Their block

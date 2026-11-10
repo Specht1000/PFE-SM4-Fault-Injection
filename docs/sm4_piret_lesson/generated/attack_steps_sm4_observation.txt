@@ -1,0 +1,151 @@
+def sm4_observation(event, previous=None, known_bit=None):
+    """Explain every peeling operation, inverse-L contribution and candidate test."""
+
+    number, byte = event['round'], event['byte']
+
+    correct, faulty = bytes.fromhex(event['correct']), bytes.fromhex(event['faulty'])
+
+    # Decode only keys already recovered at this point in the attack history.
+    keys = {}
+
+    for row, candidate_value in event['peeled_with'].items():
+        keys[int(row)] = int(candidate_value, 16)
+
+    for title, ciphertext in (("Correct", correct), ("Faulty", faulty)):
+        # Undo ciphertext reversal before evaluating the reverse round recurrence.
+        words = list(struct.unpack('>4I', ciphertext))[::-1]
+
+        formatted_values_3 = []
+
+        for word_2 in words:
+            formatted_values_3.append(f'{word_2:08X}')
+
+        lines = [f'Ciphertext = {ciphertext.hex().upper()}', 'Undo ciphertext word reversal: ' + ' '.join(formatted_values_3)]
+
+        # Peel only rounds later than the target; each uses an already recovered subkey.
+        for r in range(31, number, -1):
+            value = words[0] ^ words[1] ^ words[2] ^ keys[r]
+            substituted = sm4.sbox(value)
+            diffused = sm4.linear(substituted)
+            restored = words[3] ^ diffused
+            lines += [f"Undo round {r}, using recovered rk{r}={keys[r]:08X}", f"A = {words[0]:08X} XOR {words[1]:08X} XOR {words[2]:08X} XOR {keys[r]:08X} = {value:08X}", f"tau(A)={substituted:08X}; L(tau(A))={diffused:08X}", f"Old word = {words[3]:08X} XOR {diffused:08X} = {restored:08X}"]
+            words = [restored, words[0], words[1], words[2]]
+            formatted_values_2 = []
+
+            for word in words:
+                formatted_values_2.append(f'word={word:08X}')
+
+            lines.append('Restored chronological window: ' + ' '.join(formatted_values_2))
+
+        if number == 31:
+            lines.append("No later round needs to be undone.")
+
+        yield step(number, f"rk{number} byte {byte}: {title} round peeling", lines, correct, faulty)
+
+    clean, fault = bytes.fromhex(event['clean_view']), bytes.fromhex(event['faulty_view'])
+
+    c, f = struct.unpack('>4I', clean), struct.unpack('>4I', fault)
+
+    delta_x = c[0] ^ f[0]
+
+    lines = [f"DeltaX = {c[0]:08X} XOR {f[0]:08X} = {delta_x:08X}", "L is linear over GF(2). Apply inverse L to each set bit, then XOR contributions."]
+
+    # Start the inverse-L result at zero and XOR each active input bit contribution.
+    accumulated = 0
+
+    for bit in range(32):
+        basis = piret_sm4.inverse_linear(1 << bit)
+
+        # An unset input bit contributes nothing; a set bit contributes its inverse basis image.
+        if delta_x & 1 << bit:
+            contribution = basis
+        else:
+            contribution = 0
+
+        accumulated ^= contribution
+
+        lines.append(f"bit {bit:02d}: input={(delta_x >> bit) & 1}; inverse basis={basis:08X}; contribution={contribution:08X}; running XOR={accumulated:08X}")
+
+    if accumulated != event['delta_b'] or sm4.linear(accumulated) != delta_x:
+        raise RuntimeError("Inverse-L lesson does not match the attack observation.")
+
+    shift = 24 - byte * 8
+
+    delta = (accumulated >> shift) & 255
+
+    q = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+
+    lines += [f"DeltaB = {accumulated:08X}; L(DeltaB) = {sm4.linear(accumulated):08X} / CHECK PASS", f"Select big-endian byte {byte}: delta={delta:02X}", f"q = byte {byte} of ({c[1]:08X} XOR {c[2]:08X} XOR {c[3]:08X}) = {q:02X}"]
+
+    yield step(number, f"rk{number} byte {byte}: inverse linear transform", lines, clean, fault)
+
+    if known_bit is False:
+        allowed = (1, 2, 4, 8, 16, 32, 64, 128)
+    else:
+        allowed = (event['mask'],)
+
+    fresh = set()
+
+    lines = [f"Allowed errors = {values(allowed)}", "For every a=00..FF test S(a) XOR S(a XOR e) = delta. Then key byte = a XOR q."]
+
+    for value in range(256):
+        # Print every permitted error for this unknown input byte, including rejected tests.
+        tests = []
+
+        for error_2 in allowed:
+            tests.append((error_2, sm4.SBOX[value] ^ sm4.SBOX[value ^ error_2]))
+
+        has_match = False
+
+        for unused_index, result_2 in tests:
+            if result_2 == delta:
+                has_match = True
+                break
+
+        accepted = has_match
+
+        if accepted:
+            # Convert the compatible S-box input a to a round-key byte using public q.
+            fresh.add(value ^ q)
+
+        formatted_values = []
+
+        for error, result in tests:
+            formatted_values.append(f'e={error:02X}: {sm4.SBOX[value]:02X} XOR S[{value ^ error:02X}]={sm4.SBOX[value]:02X} XOR {sm4.SBOX[value ^ error]:02X}={result:02X}')
+
+        calculations = '; '.join(formatted_values)
+
+        if accepted:
+            element_values_2 = 'ACCEPT'
+        else:
+            element_values_2 = 'REJECT'
+
+        lines.append(f'a={value:02X}; {calculations}; expected={delta:02X}; key={value ^ q:02X} / ' + element_values_2)
+
+    yield step(number, f"rk{number} byte {byte}: all 256 S-box inputs", lines, clean, fault)
+
+    # The display uses exactly the same set intersection as the attack solver.
+    if previous is None:
+        survivors = fresh
+    else:
+        survivors = previous & fresh
+
+    if sorted(survivors) != event['survivors']:
+        raise RuntimeError("Displayed SM4 candidate intersection disagrees with the solver.")
+
+    if previous is None:
+        lines_2 = '00..FF'
+    else:
+        lines_2 = values(previous)
+
+    if previous is None:
+        element_values = set(range(256))
+    else:
+        element_values = previous
+
+    lines = ['Fresh key bytes: ' + values(fresh), 'Previous: ' + lines_2, 'Removed: ' + values(element_values - fresh), 'Intersection: ' + values(survivors)]
+
+    if len(survivors) == 1:
+        lines.append(f"UNIQUE rk{number}[{byte}] = {next(iter(survivors)):02X}")
+
+    yield step(number, f"rk{number} byte {byte}: complete intersection", lines, clean, fault)

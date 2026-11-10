@@ -1,0 +1,57 @@
+def sm4_schedule(keys):
+    """Reverse every SM4 schedule word, substitute each byte and remove FK."""
+
+    words_values = []
+
+    for row_2 in range(28, 32):
+        words_values.append(keys[row_2])
+
+    words = [None] * 32 + words_values
+
+    state = struct.pack('>4I', *words[32:])
+
+    element_values = []
+
+    for row in range(28, 32):
+        element_values.append(f'K[{row + 4}] = rk{row} = {keys[row]:08X}')
+
+    events = [step(31, 'Assemble SM4 recovered round keys', element_values, state)]
+
+    def record(index, recovered):
+        value = words[index+1] ^ words[index+2] ^ words[index+3] ^ sm4.CK[index]
+
+        substituted = sm4.sbox(value)
+
+        # Keep rotations within 32 bits because Python integers have arbitrary precision.
+        r13 = ((substituted << 13) | (substituted >> 19)) & 0xffffffff
+
+        r23 = ((substituted << 23) | (substituted >> 9)) & 0xffffffff
+
+        transformed = substituted ^ r13 ^ r23
+
+        lines = [f"U = {words[index+1]:08X} XOR {words[index+2]:08X} XOR {words[index+3]:08X} XOR CK[{index}]({sm4.CK[index]:08X}) = {value:08X}"]
+
+        computed_value_values = []
+
+        for candidate_index, byte in enumerate(value.to_bytes(4, 'big')):
+            computed_value_values.append(f'tau byte {candidate_index}: S[{byte:02X}]={sm4.SBOX[byte]:02X}')
+
+        lines += computed_value_values
+
+        lines += [f"B={substituted:08X}; rol13={r13:08X}; rol23={r23:08X}", f"L'(B) = {substituted:08X} XOR {r13:08X} XOR {r23:08X} = {transformed:08X}", f"K[{index}] = K[{index+4}] XOR L'(tau(U)) = {words[index+4]:08X} XOR {transformed:08X} = {recovered:08X}"]
+
+        words[index] = recovered
+
+        if index >= 4:
+            lines.append(f"DERIVED rk{index-4} = {recovered:08X}")
+
+        events.append(step(index, f"Reverse SM4 schedule: K[{index}]", lines, state))
+
+    master = piret_sm4.reverse_sm4(words[32:], record)
+
+    for i in range(4):
+        events.append(step(0, f"Remove FK[{i}]", [f"MK[{i}] = K[{i}] XOR FK[{i}] = {words[i]:08X} XOR {sm4.FK[i]:08X} = {words[i] ^ sm4.FK[i]:08X}"], master))
+
+    events.append(step(0, "Assemble SM4 master key", ["MK = MK[0] || MK[1] || MK[2] || MK[3]", master.hex().upper()], master))
+
+    return master, events

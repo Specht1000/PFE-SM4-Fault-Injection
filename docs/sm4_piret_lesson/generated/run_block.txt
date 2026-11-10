@@ -1,0 +1,5 @@
+def block(value):
+    data = bytes.fromhex(value)
+    if len(data) != 16:
+        raise ValueError("Key and plaintext must contain exactly 16 bytes as hex.")
+    return data

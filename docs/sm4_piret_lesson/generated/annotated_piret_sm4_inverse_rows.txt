@@ -1,0 +1,60 @@
+@lru_cache(maxsize=1)
+def inverse_rows():
+    """Invert SM4 L's 32x32 binary matrix with Gaussian elimination."""
+
+    # L(2^i) gives column i of L's binary matrix: each input bit is a basis vector.
+    columns = []
+
+    for bit_index in range(32):
+        basis_word = 1 << bit_index
+
+        transformed_word = sm4.linear(basis_word)
+
+        columns.append(transformed_word)
+
+    # Store each augmented row [L | I] in one 64-bit integer; upper bits hold I.
+    rows = []
+
+    for row_index in range(32):
+        matrix_row = 0
+
+        for column_index in range(32):
+            output_bit = (columns[column_index] >> row_index) & 1
+            matrix_row |= output_bit << column_index
+
+        identity_bit = 1 << (32 + row_index)
+
+        augmented_row = matrix_row | identity_bit
+
+        rows.append(augmented_row)
+
+    for column in range(32):
+        # Find a row with a 1 in this column, then move it to the pivot position.
+        pivot = None
+
+        for candidate_row in range(column, 32):
+            pivot_bit = (rows[candidate_row] >> column) & 1
+
+            if pivot_bit == 1:
+                pivot = candidate_row
+                break
+
+        if pivot is None:
+            raise StopIteration()
+
+        rows[column], rows[pivot] = rows[pivot], rows[column]
+
+        for row in range(32):
+            if row != column and (rows[row] >> column) & 1:
+                # XOR eliminates the column bit; GF(2) requires no division.
+                rows[row] ^= rows[column]
+
+    # The lower half is now I; the upper half contains the rows of inverse L.
+    inverse_matrix_rows = []
+
+    for augmented_row in rows:
+        inverse_row = augmented_row >> 32
+
+        inverse_matrix_rows.append(inverse_row)
+
+    return tuple(inverse_matrix_rows)

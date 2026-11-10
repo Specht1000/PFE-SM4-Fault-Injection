@@ -1,0 +1,121 @@
+def show_sm4_observation(terminal, event, recovered_bytes, start_byte=0, known_bit=None):
+    """Explain one byte-DFA or Giraud event without strengthening its model."""
+
+    number, byte = event['round'], event['byte']
+
+    # Separate previous candidate sets by target round and byte; do not mix observations.
+    identity = ('candidates', number, byte)
+
+    attack_steps.emit(terminal, attack_steps.sm4_observation(event, recovered_bytes.get(identity), known_bit))
+
+    recovered_bytes[identity] = set(event['survivors'])
+
+    if byte == start_byte and event['observation'] == 1:
+        terminal.section(f"SM4: DISCOVER rk{number} FROM NEW ROUND-{number} FAULTS")
+
+        if number == 31:
+            print("Round 31 is already last; no round needs to be undone.")
+        else:
+            keys = {}
+
+            for row, candidate_value_5 in event['peeled_with'].items():
+                keys[int(row)] = int(candidate_value_5, 16)
+
+            print("Restore the target round using ONLY previously recovered later subkeys.")
+            print("Correct execution:")
+            show_sm4_peeling(terminal, bytes.fromhex(event['correct']), number, keys)
+            print("Faulty execution (a NEW fault at the target round):")
+            show_sm4_peeling(terminal, bytes.fromhex(event['faulty']), number, keys)
+
+    print(f"\nRound {event['round']}, byte {event['byte']}, observation {event['observation']}, mask {event['mask']:02X}")
+
+    terminal.pair(bytes.fromhex(event['correct']), bytes.fromhex(event['faulty']))
+
+    print("Undo later rounds using ONLY previously recovered subkeys: " + str(event['peeled_with']))
+
+    terminal.pair(bytes.fromhex(event['clean_view']), bytes.fromhex(event['faulty_view']))
+
+    # Read restored output words, not hidden internal values from the target simulator.
+    clean_words = struct.unpack(">4I", bytes.fromhex(event['clean_view']))
+
+    faulty_words = struct.unpack(">4I", bytes.fromhex(event['faulty_view']))
+
+    shift = 24 - 8 * byte
+
+    known = ((clean_words[1] ^ clean_words[2] ^ clean_words[3]) >> shift) & 255
+
+    delta = (event['delta_b'] >> shift) & 255
+
+    print(f"DeltaX = {clean_words[0]:08X} XOR {faulty_words[0]:08X} = {clean_words[0] ^ faulty_words[0]:08X}")
+    print(f"DeltaB = L-inverse(DeltaX) = {event['delta_b']:08X}; selected byte difference = {delta:02X}")
+    print(f"Known byte q = byte {byte} of (X{number+1} XOR X{number+2} XOR X{number+3}) = {known:02X}")
+
+    # Unknown-bit Giraud permits eight masks; the controlled-byte DFA uses the known mask.
+    if known_bit is False:
+        allowed = (1, 2, 4, 8, 16, 32, 64, 128)
+
+        print("UNKNOWN-BIT FILTER: the simulator mask above is NOT given to the candidate solver.")
+    else:
+        allowed = (event['mask'],)
+
+        print("KNOWN-MASK FILTER: the exact error is given to the candidate solver.")
+
+    formatted_values_3 = []
+
+    for candidate_value_4 in allowed:
+        formatted_values_3.append(f'{candidate_value_4:02X}')
+
+    print('Allowed input errors: ' + ' '.join(formatted_values_3))
+    print(f"Test a=00..FF: at least one allowed e must satisfy S(a) XOR S(a XOR e) = {delta:02X}.")
+
+    for candidate in event['inputs']:
+        error = None
+
+        for allowed_error in allowed:
+            faulty_input = candidate ^ allowed_error
+            predicted_difference = sm4.SBOX[candidate] ^ sm4.SBOX[faulty_input]
+
+            if predicted_difference == delta:
+                error = allowed_error
+                break
+
+        if error is None:
+            raise StopIteration()
+
+        changed = candidate ^ error
+
+        print(f"  a={candidate:02X}, compatible e={error:02X}: S[{candidate:02X}] XOR S[{changed:02X}] = {sm4.SBOX[candidate]:02X} XOR {sm4.SBOX[changed]:02X} = {delta:02X}; rk byte = a XOR q = {candidate:02X} XOR {known:02X} = {candidate ^ known:02X}")
+
+    print(f"L-inverse difference: {event['delta_b']:08X}; candidates {event['before']} -> {event['remaining']}")
+
+    formatted_values_2 = []
+
+    for candidate_value_2 in event['survivors']:
+        formatted_values_2.append(f'{candidate_value_2:02X}')
+
+    print('Survivors: ' + ' '.join(formatted_values_2))
+
+    if event['remaining'] == 1:
+        value = event['survivors'][0]
+
+        # Store uniquely recovered bytes until the four-byte round key can be assembled.
+        recovered_bytes.setdefault(number, {})[byte] = value
+
+        print(terminal.paint(f"RECOVERED rk{number} byte {byte} = {value:02X} / UNIQUE", "32"))
+
+        if len(recovered_bytes[number]) == 4:
+            byte_values = []
+
+            for index in range(4):
+                byte_values.append(recovered_bytes[number][index])
+
+            ordered = bytes(byte_values)
+            formatted_values = []
+
+            for candidate_value in ordered:
+                formatted_values.append(f'{candidate_value:02X}')
+
+            print('Assemble bytes in big-endian order: ' + ' || '.join(formatted_values))
+            print(terminal.paint(f"DFA ASSEMBLED rk{number} = {ordered.hex().upper()}", "1;32"))
+
+    terminal.pause()

@@ -1,0 +1,543 @@
+\documentclass[11pt,a4paper]{report}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\usepackage[margin=22mm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,longtable,array,xcolor,graphicx,float}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
+\usepackage{fvextra}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,urlcolor=teal!60!black,pdftitle={SM4 controlled DFA: code, execution and full key recovery},pdfauthor={Guilherme Martins Specht}}
+\fvset{fontsize=\scriptsize,breaklines=true,breakanywhere=true,numbers=left,numbersep=4pt,xleftmargin=5mm}
+\setlength{\emergencystretch}{3em}
+\setcounter{tocdepth}{1}
+\newcommand{\hx}[1]{\texttt{#1}}
+\newcommand{\xor}{\mathbin{\oplus}}
+\newcommand{\rol}{\operatorname{rol}}
+\newcommand{\remember}[1]{\par\medskip\noindent\fcolorbox{teal!60!black}{teal!3}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{#1}}\par\medskip}
+\tikzset{box/.style={draw,rounded corners,align=center,minimum height=11mm,text width=36mm,fill=blue!4},smallbox/.style={draw,align=center,minimum width=28mm,minimum height=10mm},flow/.style={-{Stealth},thick},fault/.style={draw=red!70!black,fill=red!6,text=red!70!black}}
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+\vspace*{15mm}
+{\Large Polytech Montpellier --- PFE 5A\par}
+\vspace{12mm}
+{\Huge\bfseries Understanding SM4 Fault-Based Key Recovery\par}
+\vspace{8mm}
+{\LARGE A line-by-line illustrated execution guide to\par}
+\vspace{3mm}
+{\Large\texttt{piret\_sm4.py} and \texttt{run.py}\par}
+\vspace{15mm}
+\begin{tikzpicture}
+\node[box] (c) {Correct and faulty ciphertexts};
+\node[box,below=7mm of c] (k) {Recover four final round keys};
+\node[box,below=7mm of k] (m) {Reverse the schedule and recover the master key};
+\draw[flow] (c)--(k);\draw[flow] (k)--(m);
+\end{tikzpicture}
+\vfill
+{\large Guilherme Martins Specht\par}
+\vspace{3mm}
+Academic supervisor: Prof. Philippe Maurine\par
+Industrial collaboration: STMicroelectronics\par
+\vspace{8mm}
+Independent educational document --- 8 November 2026\par
+\end{titlepage}
+\pagenumbering{roman}
+\hypersetup{pageanchor=true}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\chapter{What this lesson demonstrates}
+\section{The question we will answer}
+How can a program recover an unknown SM4 master key by comparing correct and faulty ciphertexts? We will follow one complete execution, connect each equation to the Python code, and explain why every recovered byte is justified by observations.
+
+This document is independent of the main AES/SM4 report. It includes its own explanations, drawings, numerical tables and current-code excerpts. All generated numerical tables come from an actual execution of the implementation, not manually invented intermediate values.
+
+\remember{\textbf{Precise scope.} The module is named \texttt{piret\_sm4.py}, but the experiment is a controlled-byte SM4 DFA extension. It is not the AES Piret attack applied unchanged. The model assumes a known XOR mask at a selected S-box input byte in each of rounds 31, 30, 29 and 28. Physical glitch access with these properties has not been demonstrated here.}
+
+\section{Run exactly this experiment}
+From the repository root:
+\begin{Verbatim}[numbers=none]
+python src/run.py --algorithm sm4 --step
+\end{Verbatim}
+The equivalent attack-specific entry point is:
+\begin{Verbatim}[numbers=none]
+python src/piret_sm4.py --step
+\end{Verbatim}
+The former calls \texttt{run.main()} and then \texttt{sm4\_demo()}. The latter parses its arguments and calls the same \texttt{run.sm4\_demo()}. The mathematical lesson is shared; log filenames differ.
+
+Press Enter at a teaching pause. A stage can contain hundreds of printed candidate tests: scroll within the terminal before continuing. Remove \texttt{--step} to execute continuously. The default limit is eight observations \emph{per target byte}; it is not eight faults for the entire recovery.
+
+The worked vector is fixed:
+\begin{Verbatim}[numbers=none]
+Plaintext:  0123456789ABCDEFFEDCBA9876543210
+Master key: 0123456789ABCDEFFEDCBA9876543210
+Ciphertext: 681EDF34D206965E86B3E94F536E4246
+\end{Verbatim}
+Interactive defaults come from \texttt{sm4.KEY} and \texttt{sm4.PLAINTEXT}. If you change them, the equations still apply but the printed numbers change. The document generator deliberately uses the fixed public vector above.
+
+\section{Separate what the target knows from what the attacker knows}
+\begin{center}
+\begin{tikzpicture}
+\node[box,text width=48mm] (target) {\textbf{Simulated target}\\Plaintext and secret key\\SM4 encryption\\Controlled fault callback};
+\node[box,text width=48mm,right=22mm of target] (solver) {\textbf{Candidate solver}\\Correct/faulty outputs\\Round, byte and known mask\\Recovered later keys only};
+\draw[flow] (target)--node[above,align=center]{Ciphertexts}(solver);
+\node[below=8mm of target,align=center,text width=55mm] {Internal values may be printed\\in the teacher view.};
+\node[below=8mm of solver,align=center,text width=55mm] {No master key, hidden state\\or reference subkeys are inputs.};
+\end{tikzpicture}
+\end{center}
+\texttt{oracle(round, byte, mask)} is a callable that requests a faulty encryption. It represents an experimental target interface, not a cryptographic oracle that reveals the key. In this simulation the callback closes over the target key; its return value is only a ciphertext.
+
+\section{A map of the files}
+\begin{center}\begin{tabular}{p{42mm}p{105mm}}\toprule
+File&Responsibility\\\midrule
+\texttt{sm4.py}&Normal SM4 encryption, decryption and generic observation hooks.\\
+\texttt{piret\_sm4.py}&Fault adapter, inverse diffusion, candidate equations, round peeling, recovery and inverse schedule.\\
+\texttt{run.py}&Terminal orchestration, comparisons, pauses, observation reporting and final checks.\\
+\texttt{attack\_steps.py}&Detailed numerical teaching events used by terminal and GUI.\\
+\texttt{terminal\_log.py}&Mirror execution to the terminal, TXT and colored HTML logs.\\\bottomrule
+\end{tabular}\end{center}
+
+\chapter{Read the SM4 round before attacking it}
+\section{Bytes, words and numbering}
+One byte is eight bits. One SM4 word is four bytes, or 32 bits. A block contains four words, or 16 bytes. Word byte order is big-endian: byte 0 is the leftmost, most significant byte.
+Byte and word values in the worked cryptographic calculations are hexadecimal; round numbers and bit indices are decimal.
+\begin{center}
+\begin{tikzpicture}
+\foreach \v/\p in {96/0,FF/1,9D/2,45/3}{\node[smallbox] at (\p*3.1,0) {\texttt{\v}};\node at (\p*3.1,-.9) {byte \p};}
+\node[align=center] at (4.65,-1.8) {\texttt{96FF9D45}: one word, not four independent states};
+\end{tikzpicture}
+\end{center}
+Round indices are zero-based: round 31 is the \emph{32nd} and final round. SM4 creates words \(X_4,\ldots,X_{35}\). The final ciphertext is
+\[C=X_{35}\parallel X_{34}\parallel X_{33}\parallel X_{32}.\]
+Word reversal is not byte reversal within each word.
+
+\section{Four calculations form one round}
+For round \(i\):
+\begin{align*}
+A&=X_{i+1}\xor X_{i+2}\xor X_{i+3}\xor rk_i,\\
+B&=\tau(A),\\
+D&=L(B)=B\xor\rol(B,2)\xor\rol(B,10)\xor\rol(B,18)\xor\rol(B,24),\\
+X_{i+4}&=X_i\xor D.
+\end{align*}
+The four bytes pass independently through the SM4 S-box in \(\tau\). The rotations in \(L\) mix bits across the word. All rotations operate on 32 bits and wrap around.
+\begin{center}
+\begin{tikzpicture}[node distance=5mm]
+\node[box,text width=60mm] (a) {Three newest words $\xor\ rk_i$\\$A$};
+\node[box,below=of a] (b) {Four parallel S-boxes\\$B=\tau(A)$};
+\node[box,below=of b] (l) {Rotations and XOR\\$D=L(B)$};
+\node[box,below=of l,text width=60mm] (x) {Oldest word $X_i\xor D$\\New word $X_{i+4}$};
+\draw[flow](a)--(b);\draw[flow](b)--(l);\draw[flow](l)--(x);
+\draw[flow,red!70!black] ([xshift=-24mm]a.west)--node[above]{fault}(a.west);
+\end{tikzpicture}
+\end{center}
+
+\section{Translate the normal terminal line}
+\begin{Verbatim}[numbers=none]
+Round 00: A=F002C39E B=18E992B1 L(B)=26D99622 new=27FAD345
+\end{Verbatim}
+\texttt{run.sm4\_demo()} first obtains the clean trace with \texttt{sm4\_encrypt()}, a wrapper around the target adapter with no selected fault byte. The \texttt{for item in trace} loop prints one record per round. A record is a dictionary: \texttt{item['a']} is the S-box input; \texttt{item['new']} is the new word.
+
+\texttt{sm4.round()} calls \texttt{observe()} around each intermediate value. Without an observer, a value is returned unchanged. With a callback, returning \texttt{None} preserves it; returning an integer replaces it. This separates a normal cipher from attack-specific interventions.
+
+\section{The last clean round of our example}
+\begin{align*}
+X_{31}&=\hx{7B938F4C},&rk_{31}&=\hx{9124A012},\\
+A&=\hx{96FF9D45},&B&=\hx{1A488C73},\\
+L(B)&=\hx{138D5078},&X_{35}&=\hx{681EDF34}.
+\end{align*}
+Check the last equation:
+\[\hx{7B938F4C}\xor\hx{138D5078}=\hx{681EDF34}.\]
+These internal values are shown to verify the simulation. The solver must recover \(rk_{31}\), not take it from this display. All 32 clean-round records are reproduced in Appendix A.
+
+\chapter{Follow the Python call chain}
+\section{Who calls whom?}
+\begin{center}
+\begin{tikzpicture}[node distance=6mm]
+\node[box,text width=85mm] (main) {\texttt{run.main(argv)}\\parse \texttt{--algorithm sm4}, observation limit and pauses};
+\node[box,below=of main,text width=85mm] (demo) {\texttt{run.sm4\_demo(terminal, limit)}\\read inputs; collect clean ciphertext and trace};
+\node[box,below=of demo,text width=85mm] (recover) {\texttt{piret\_sm4.recover\_sm4\_master\_key(...)}\\recover rounds 31, 30, 29, 28};
+\node[box,below=of recover,text width=85mm] (schedule) {\texttt{reverse\_sm4(final\_keys)}\\derive earlier words; remove FK};
+\node[box,below=of schedule,text width=85mm] (verify) {\texttt{attack\_steps.verification(...)}\\encrypt/decrypt; check target key separately};
+\draw[flow](main)--(demo);\draw[flow](demo)--(recover);\draw[flow](recover)--(schedule);\draw[flow](schedule)--(verify);
+\end{tikzpicture}
+\end{center}
+The detailed presentation may reverse the schedule again to print every numerical step. That repetition is a consistency check of the display, not a second independent key recovery or an additional fault query.
+
+\section{The two nested callbacks in \texttt{sm4\_demo}}
+\begin{Verbatim}
+def oracle(number, byte, mask):
+    faulty, fault_trace = piret_sm4.sm4_fault_encrypt(plaintext, key, byte, mask, number)
+    # Teacher-only propagation is displayed here.
+    return faulty
+
+def report(event):
+    show_sm4_observation(terminal, event, recovered_bytes, start_byte)
+\end{Verbatim}
+This shortened excerpt omits only the teacher-printing call. The complete current function is included in the source appendix. These are nested functions: they can read the surrounding \texttt{plaintext}, \texttt{key} and \texttt{terminal}. Only the oracle accesses the target key. The report callback receives copied observation metadata after the solver has computed the intersection.
+
+\texttt{range(1, limit+1)} supplies masks \(01,02,\ldots\) up to the requested maximum. Although the first two masks each flip one bit, this controlled-byte model permits other nonzero byte masks, including multi-bit masks. The program stops early whenever a byte becomes unique.
+
+\section{What data is stored?}
+\begin{center}\begin{tabular}{p{35mm}p{112mm}}\toprule
+Variable&Meaning\\\midrule
+\texttt{keys}&Dictionary of already recovered round keys; initially empty.\\
+\texttt{subkey}&Four-byte buffer for the current round key.\\
+\texttt{survivors}&Set of compatible key-byte values. \texttt{None} means no observation yet.\\
+\texttt{fresh}&Candidates compatible with only the current ciphertext pair.\\
+\texttt{history}&Observation dictionaries used by logs and GUI explanations.\\
+\texttt{used}&Number of actual faulty ciphertext queries.\\
+\texttt{clean\_view}&Ciphertext-style four-word view restored to the target round.\\
+\texttt{faulty\_view}&Equivalent restored view for the faulty encryption.\\\bottomrule
+\end{tabular}\end{center}
+
+\chapter{First fault: recover candidates for byte 0 of rk31}
+\section{Step 1: the external callback changes one byte}
+The relevant line in \texttt{sm4\_fault\_encrypt()} is:
+\begin{Verbatim}
+if number == fault_round and operation == "Sbox input" and byte is not None:
+    value ^= mask << (24 - 8 * byte)
+\end{Verbatim}
+The three conditions select the round, intermediate value and whether a fault was requested. \texttt{byte=None} creates a clean run. For \texttt{byte=0}, the shift is 24, so mask \texttt{01} becomes \texttt{01000000}. The augmented assignment \texttt{\^{}=} XORs the mask into the current 32-bit value.
+\[\hx{96FF9D45}\xor\hx{01000000}=\hx{97FF9D45}.\]
+The observer returns the changed value to the actual SM4 round. Its trace stores \texttt{a}, \texttt{b}, \texttt{linear} and \texttt{new} for teaching.
+
+\section{Step 2: the S-box changes the difference}
+For the selected input byte:
+\[S(\hx{96})=\hx{1A},\qquad S(\hx{97})=\hx{55}.\]
+Therefore
+\[\Delta B=\hx{1A488C73}\xor\hx{55488C73}=\hx{4F000000}.\]
+\begin{center}
+\begin{tikzpicture}
+\node[smallbox] (a) at (0,0) {$96\xor97=01$};
+\node[smallbox] (b) at (5,0) {$1A\xor55=4F$};
+\draw[flow] (a)--node[above]{S-box}(b);
+\node[align=center,text width=110mm] at (2.5,-1.2) {One changed input byte remains one changed S-box output byte.\\The nonlinear S-box changes its difference from $01$ to $4F$.};
+\end{tikzpicture}
+\end{center}
+
+\section{Step 3: linear diffusion spreads that byte difference}
+\[L(\hx{4F000000})=\hx{734E3D3D}.\]
+The four bytes are now nonzero. Since the oldest input word remains unchanged, this is also the newest output-word difference:
+\[X'_{35}=\hx{681EDF34}\xor\hx{734E3D3D}=\hx{1B50E209}.\]
+\begin{center}
+\begin{tikzpicture}[node distance=6mm]
+\node[box,fault,text width=75mm] (in) {Injected input difference: \texttt{01 00 00 00}};
+\node[box,fault,below=of in,text width=75mm] (sb) {S-box output difference: \texttt{4F 00 00 00}};
+\node[box,fault,below=of sb,text width=75mm] (lin) {Linear output difference: \texttt{73 4E 3D 3D}};
+\draw[flow](in)--node[right]{$\tau$ is nonlinear}(sb);
+\draw[flow](sb)--node[right]{$L$ diffuses the difference}(lin);
+\end{tikzpicture}
+\end{center}
+\remember{\textbf{Why does the teacher-view XOR contain many bytes?} Its four displayed words are \(A\), \(\tau(A)\), \(L(\tau(A))\), and the new word. They are four intermediate results concatenated for display, not the complete cipher state. Only the first injected difference is a one-byte mask.}
+
+\section{Step 4: keep only the public ciphertexts}
+\begin{Verbatim}[numbers=none]
+Correct: 681EDF34 D206965E 86B3E94F 536E4246
+Faulty:  1B50E209 D206965E 86B3E94F 536E4246
+XOR:     734E3D3D 00000000 00000000 00000000
+\end{Verbatim}
+\texttt{struct.unpack(">4I", ciphertext)} converts 16 bytes into four big-endian unsigned words. The solver checks \texttt{c[1:] == f[1:]}. If any of those three unchanged words differs, this pair does not satisfy the assumed restored last-round model and is rejected.
+
+\section{Step 5: derive the equation that cancels the hidden old word}
+The two last-round equations are:
+\[X_{35}=X_{31}\xor L(B),\qquad X'_{35}=X_{31}\xor L(B').\]
+XORing them cancels \(X_{31}\) because a value XORed with itself is zero:
+\begin{align*}
+\Delta X&=X_{35}\xor X'_{35}\\
+&=X_{31}\xor X_{31}\xor L(B)\xor L(B')\\
+&=L(B\xor B')=L(\Delta B).
+\end{align*}
+So the attacker can compute \(\Delta B=L^{-1}(\Delta X)\) without knowing \(X_{31}\), \(B\), \(B'\) or the round key.
+
+\chapter{Understand inverse L without treating it as magic}
+\section{What does GF(2) mean here?}
+GF(2) contains only 0 and 1. Addition is XOR and multiplication is AND. In particular \(1+1=0\). A 32-bit word can be treated as a vector of 32 such coefficients.
+
+Rotations rearrange bit positions. XOR combines them. Thus \(L(u\xor v)=L(u)\xor L(v)\), and L can be represented by a binary matrix \(M\):
+\[\Delta X=M\Delta B,\qquad\Delta B=M^{-1}\Delta X.\]
+Here arithmetic is bitwise GF(2), not the AES byte-field multiplication in GF(\(2^8\)).
+
+\section{How \texttt{inverse\_rows()} constructs the inverse}
+\begin{enumerate}
+\item For each bit position \(i\), compute \texttt{sm4.linear(1 << i)}. This gives column \(i\) of M.
+\item Assemble 32 rows and append an identity matrix: \([M\mid I]\).
+\item For each column, select a pivot row containing a 1 and swap it into place.
+\item XOR that row into every other row having a 1 in the same column.
+\item The left half becomes I, and the right half becomes \(M^{-1}\).
+\end{enumerate}
+There is no division: the only nonzero pivot in GF(2) is 1. The implementation packs each augmented row into a Python integer; the lower 32 bits store M and the upper 32 bits store I. After elimination, \texttt{row >> 32} extracts an inverse row. \texttt{@lru\_cache(maxsize=1)} caches this public, key-independent matrix.
+
+\section{A smaller four-bit drawing of the same method}
+This is a toy matrix, \emph{not} the SM4 matrix, so we can see the entire operation:
+\[
+\left[\begin{array}{cccc|cccc}
+1&1&0&0&1&0&0&0\\0&1&1&0&0&1&0&0\\0&0&1&1&0&0&1&0\\0&0&0&1&0&0&0&1
+\end{array}\right]
+\longrightarrow
+\left[\begin{array}{cccc|cccc}
+1&0&0&0&1&1&1&1\\0&1&0&0&0&1&1&1\\0&0&1&0&0&0&1&1\\0&0&0&1&0&0&0&1
+\end{array}\right].
+\]
+The toy matrix maps \(1010\) to \(1110\); the right-hand inverse maps \(1110\) back to \(1010\). The real code performs the same kind of elimination with 32 rows.
+
+\section{Two equivalent ways the code applies the inverse}
+The solver's expanded \texttt{inverse\_linear(value)} calculates a dot product for each inverse row in explicit steps:
+\begin{Verbatim}
+selected_bits = row & value
+set_bit_count = bin(selected_bits).count("1")
+parity = set_bit_count & 1
+result |= parity << index
+\end{Verbatim}
+\texttt{row \& value} selects shared set bits. Counting them and keeping the lowest bit computes parity: an even count gives 0, an odd count gives 1. Shifting that parity to its output position and ORing disjoint bit positions assembles the word.
+
+The detailed terminal instead explains the equivalent column/basis expansion:
+\[L^{-1}(v)=\mathop{\bigoplus}_{i:v_i=1}L^{-1}(2^i).\]
+It prints all 32 input-bit contributions. \texttt{inverse basis} is \(L^{-1}(2^i)\); \texttt{contribution} is that value if the input bit is 1, or zero otherwise. \texttt{running XOR} is the accumulated answer. Bit 0 is the rightmost, least significant bit.
+
+For our example the first three relevant calculations are:
+\begin{align*}
+i=0:&\quad 0\xor\hx{41455115}=\hx{41455115},\\
+i=1:&\quad\hx{41455115}\xor0=\hx{41455115},\\
+i=2:&\quad\hx{41455115}\xor\hx{05154455}=\hx{44501540}.
+\end{align*}
+After all bits:
+\[\boxed{L^{-1}(\hx{734E3D3D})=\hx{4F000000}}.\]
+The terminal checks \(L(\hx{4F000000})=\hx{734E3D3D}\). Appendix C prints every contribution.
+
+\chapter{Turn a difference into a recovered key byte}
+\section{Select the affected byte and compute q}
+For byte 0, \texttt{shift = 24 - 8*byte} equals 24. Right shifting \(\Delta B\) by 24 and masking with 255 selects \(d=\hx{4F}\). The code rejects differences with nonzero bits outside that byte.
+
+The S-box input is
+\[A=X_{32}\xor X_{33}\xor X_{34}\xor rk_{31}.\]
+The three data words are visible in the ciphertext. Their XOR is:
+\[\hx{D206965E}\xor\hx{86B3E94F}\xor\hx{536E4246}=\hx{07DB3D57}.\]
+Its first byte is \(q=\hx{07}\). If the unknown first S-box input byte is \(a\), then
+\[a=q\xor k,\qquad \boxed{k=a\xor q}.\]
+\remember{The solver guesses the unknown \emph{S-box input} \(a\) first. It converts compatible inputs into key-byte guesses using q. The variable \texttt{inputs} is therefore not the same set as the returned key-byte candidates.}
+
+\section{First observation: two inputs remain}
+For known mask \(e=\hx{01}\), try every \(a=00,\ldots,FF\):
+\[S(a)\xor S(a\xor\hx{01})=\hx{4F}.\]
+Only \(a=\hx{96}\) and \(a=\hx{97}\) pass. For instance:
+\[S(\hx{96})\xor S(\hx{97})=\hx{1A}\xor\hx{55}=\hx{4F}.\]
+The order can be reversed and the XOR stays the same, explaining this pair of inputs. Convert them to key guesses:
+\[\hx{96}\xor\hx{07}=\hx{91},\qquad\hx{97}\xor\hx{07}=\hx{90}.\]
+So the first key-byte set is \(\{\hx{90},\hx{91}\}\). Even though the teacher view showed input \(96\), the solver must not use that hidden value to discard \(90\).
+
+\section{Second observation: intersect, do not guess}
+Request a new fault at the \emph{same} byte with mask \(02\). The faulty ciphertext is
+\begin{Verbatim}[numbers=none]
+ED9DD932 D206965E 86B3E94F 536E4246
+\end{Verbatim}
+The recovered S-box difference is \(\hx{81000000}\), giving \(d=\hx{81}\). The compatible inputs are:
+\[\{\hx{75},\hx{77},\hx{94},\hx{96}\}.\]
+After XOR with \(q=07\), the fresh key guesses are:
+\[\{\hx{70},\hx{72},\hx{91},\hx{93}\}.\]
+Intersect with the first observation:
+\[\boxed{\{90,91\}\cap\{70,72,91,93\}=\{91\}}.\]
+\begin{center}
+\begin{tikzpicture}[node distance=7mm]
+\node[box,text width=74mm] (first) {Observation 1: key candidates $\{90,91\}$};
+\node[box,below=of first,text width=74mm] (second) {Observation 2: key candidates $\{70,72,91,93\}$};
+\node[box,below=of second,text width=74mm,fill=green!7] (unique) {Intersection $\{91\}$: uniquely recovered byte};
+\draw[flow](first.east)--++(12mm,0)|-(unique.east);
+\draw[flow](second)--(unique);
+\end{tikzpicture}
+\end{center}
+The terminal prints \texttt{RECOVERED rk31 byte 0 = 91 / UNIQUE}. Full input tests for both observations are in Appendix D.
+
+\section{Understand the recovery loop and Python's for--else}
+The essential blocks in \texttt{recover\_sm4\_master\_key()} are:
+\begin{Verbatim}
+survivors = None
+for observation, mask in enumerate(masks, 1):
+    faulty = bytes(fault_oracle(number, byte, mask))
+    faulty_view = peel_sm4(faulty, number, keys)
+    fresh, inputs, delta = sm4_byte_candidates(clean_view, faulty_view, byte, mask)
+    if survivors is None:
+        survivors = set(fresh)
+    else:
+        survivors = survivors & fresh
+    if not survivors:
+        raise ValueError(...)
+    if len(survivors) == 1:
+        subkey[byte] = next(iter(survivors))
+        break
+else:
+    return ...  # incomplete result, with master_key=None
+\end{Verbatim}
+This is an explanatory excerpt: event creation and the optional alternative filter are omitted here but preserved in the full source appendix.
+\begin{itemize}
+\item \texttt{enumerate(masks,1)} gives a human-readable observation count starting at 1.
+\item \texttt{None} means no constraint yet; an empty set means inconsistent observations.
+\item \texttt{\&} intersects sets. It does not perform byte XOR.
+\item \texttt{next(iter(survivors))} is safe here only because the length was checked to be exactly one.
+\item \texttt{break} stops querying this byte once it is unique.
+\item The \texttt{else} belongs to the \emph{for loop}, not the preceding if: it runs only if the loop ends without a break. An ambiguous byte blocks full recovery.
+\end{itemize}
+
+\chapter{Recover all four tail keys, not just rk31}
+\section{Finish the other bytes of rk31}
+The same equations recover bytes 1, 2 and 3. Their q bytes are \(DB,3D,57\), respectively. They become \(24,A0,12\). Concatenate in big-endian order:
+\[rk_{31}=\hx{91}\parallel\hx{24}\parallel\hx{A0}\parallel\hx{12}=\hx{9124A012}.\]
+\texttt{int.from\_bytes(subkey,"big")} performs this assembly. Four unique bytes are required before \texttt{keys[31]} is populated.
+
+\section{Why do we need new faults in earlier rounds?}
+One 32-bit subkey does not supply the four consecutive words required to invert SM4's 128-bit key schedule. Recover the final four subkeys in reverse chronological order:
+\begin{center}
+\begin{tikzpicture}[node distance=6mm]
+\node[box,text width=88mm] (r31) {Faults in round 31 $\longrightarrow rk_{31}$\\No peeling};
+\node[box,below=of r31,text width=88mm] (r30) {New faults in round 30 $\longrightarrow rk_{30}$\\Undo round 31 using recovered $rk_{31}$};
+\node[box,below=of r30,text width=88mm] (r29) {New faults in round 29 $\longrightarrow rk_{29}$\\Undo rounds 31 and 30};
+\node[box,below=of r29,text width=88mm] (r28) {New faults in round 28 $\longrightarrow rk_{28}$\\Undo rounds 31, 30 and 29};
+\draw[flow](r31)--(r30);\draw[flow](r30)--(r29);\draw[flow](r29)--(r28);
+\end{tikzpicture}
+\end{center}
+The program does not reuse a last-round faulty ciphertext and pretend it reveals earlier keys. It requests a new target encryption at each selected earlier round.
+
+\section{How \texttt{peel\_sm4()} restores an older window}
+Let the chronological post-round state be \((u_0,u_1,u_2,u_3)\). With the recovered key of that round:
+\begin{align*}
+A&=u_0\xor u_1\xor u_2\xor rk,\\
+\text{previous}&=u_3\xor L(\tau(A)),\\
+\text{restored state}&=(\text{previous},u_0,u_1,u_2).
+\end{align*}
+\begin{center}
+\begin{tikzpicture}
+\foreach \v/\p in {u_0/0,u_1/1,u_2/2,u_3/3}{\node[smallbox] at (\p*3.2,0) {$\v$};}
+\node[smallbox,fill=green!7] at (0,-2) {previous};
+\foreach \v/\p in {u_0/1,u_1/2,u_2/3}{\node[smallbox] at (\p*3.2,-2) {$\v$};}
+\draw[flow] (0,-.5)--(3.2,-1.5);\draw[flow](3.2,-.5)--(6.4,-1.5);\draw[flow](6.4,-.5)--(9.6,-1.5);
+\node[align=center] at (4.8,-3) {The newest word and recovered key reconstruct the missing oldest word.};
+\end{tikzpicture}
+\end{center}
+\texttt{words = unpack(...)[::-1]} restores chronological order. The loop runs only over later rounds. A missing recovered key raises an error. The function finally serializes \texttt{words[::-1]} again to preserve the ciphertext-style layout expected by the byte filter.
+
+\section{A real round-30 example from the execution}
+Below, \texttt{correct}/\texttt{faulty} are actual final ciphertexts. \texttt{clean\_view}/\texttt{faulty\_view} are synthetic restored outputs after undoing round 31. They are not a second physical measurement.
+\VerbatimInput[numbers=none]{generated/peeling.txt}
+
+After peeling, the same newest-word difference equation and unchanged-word checks apply to round 30. Repeat the process for rounds 29 and 28.
+
+\section{Result and actual query count}
+For this fixed example every byte becomes unique after two observations:
+\[4\text{ target rounds}\times4\text{ bytes}\times2\text{ observations}=32\text{ faulty ciphertexts}.\]
+There is also a clean reference ciphertext. Diagnostic replays and schedule printing do not increase \texttt{result['used']}.
+\begin{center}\begin{tabular}{cl}\toprule Recovered key&Value\\\midrule
+$rk_{31}$&\hx{9124A012}\\$rk_{30}$&\hx{01CF72E5}\\$rk_{29}$&\hx{62293496}\\$rk_{28}$&\hx{428D3654}\\\bottomrule\end{tabular}\end{center}
+The count 32 is the measured result for this vector and these masks, not a universal fault requirement. Appendix B lists all 32 observations, fresh candidate sets and intersections.
+
+\chapter{Reverse the schedule to obtain the original master key}
+\section{Public CK and FK are not secret material}
+The four fixed FK words are
+\[\hx{A3B1BAC6},\quad\hx{56AA3350},\quad\hx{677D9197},\quad\hx{B27022DC}.\]
+They initialize \(K_i=MK_i\xor FK_i\). The 32 CK words are generated from public byte values:
+\[ck_{i,j}=7(4i+j)\bmod256,\qquad CK_i=ck_{i,0}\parallel\cdots\parallel ck_{i,3}.\]
+For example \(CK_0=\hx{00070E15}\), \(CK_{31}=\hx{646B7279}\). FK values are directly specified constants; the implementation does not derive them from CK. Neither set depends on the secret key.
+
+\section{Four recovered subkeys seed the inverse recurrence}
+\[K_{32}=rk_{28},\quad K_{33}=rk_{29},\quad K_{34}=rk_{30},\quad K_{35}=rk_{31}.\]
+The forward recurrence is
+\[K_{i+4}=K_i\xor L'(\tau(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i)).\]
+XOR is self-inverse, so
+\[\boxed{K_i=K_{i+4}\xor L'(\tau(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i))}.\]
+The code iterates \texttt{range(31,-1,-1)}: 31, 30, \ldots, 0. This order guarantees that the four required higher-index words are already known.
+
+\section{Read one inverse schedule step}
+For \(i=31\), calculate:
+\[U=K_{32}\xor K_{33}\xor K_{34}\xor CK_{31}.\]
+Then substitute all four bytes and apply
+\[L'(B)=B\xor\rol(B,13)\xor\rol(B,23).\]
+Finally compute \(K_{31}=K_{35}\xor L'(\tau(U))=\hx{F1780C81}\).
+\remember{\textbf{Do not confuse the transforms.} Encryption uses rotations 2, 10, 18 and 24. Key expansion uses 13 and 23. The code correctly calls \texttt{sm4.linear\_key()}, not \texttt{sm4.linear()}, inside \texttt{reverse\_sm4()}.}
+
+The terminal prints every S-box lookup and rotation. Earlier encryption keys \(rk_{27},\ldots,rk_0\) are labeled \texttt{DERIVED}: they come from the schedule, not additional fault observations. Appendix E contains all 32 numerical inverse steps.
+
+\section{Remove FK and assemble the 128-bit key}
+The first four recovered schedule words still contain whitening:
+\[MK_i=K_i\xor FK_i\quad(i=0,1,2,3).\]
+\input{generated/fk.tex}
+Concatenate the four 32-bit words:
+\[\boxed{MK=\hx{01234567}\parallel\hx{89ABCDEF}\parallel\hx{FEDCBA98}\parallel\hx{76543210}}.\]
+\texttt{struct.pack(">4I", ...)} produces the original 16 key bytes in big-endian word order.
+
+\chapter{Final checks, logs and presentation checklist}
+\section{What does PASS establish?}
+The terminal independently verifies:
+\begin{enumerate}
+\item Encryption with the recovered key equals the original correct ciphertext.
+\item Decryption of the correct ciphertext with the recovered key equals the plaintext.
+\item The displayed inverse schedule agrees with the recovery engine.
+\item The recovered key equals the simulated target key, revealed for ground-truth validation.
+\end{enumerate}
+These checks establish consistency for the executed software experiment. A correct round trip by itself would not prove that an attack had recovered the target key; the ciphertext and ground-truth comparisons matter.
+\begin{Verbatim}[numbers=none]
+Recovered key: 0123456789ABCDEFFEDCBA9876543210
+Encrypt(P, recovered key): 681EDF34D206965E86B3E94F536E4246
+Decrypt(C, recovered key): 0123456789ABCDEFFEDCBA9876543210
+SM4 MASTER KEY: 0123456789ABCDEFFEDCBA9876543210 / PASS
+32 faulty outputs. All four subkeys came from DFA, not references.
+\end{Verbatim}
+This block combines the final values for readability; exact heading wording is determined by the executable version.
+
+\section{How the terminal explanation and logs are produced}
+\texttt{show\_sm4\_observation()} calls the detailed event generator in \texttt{attack\_steps.sm4\_observation()}. It explains peeling, all inverse-L contributions and all 256 candidate inputs, then prints concise recovered-byte summaries. Seeing a summary after a detailed table is not an extra observation.
+
+\texttt{LessonTerminal.pair()} prints correct/faulty/XOR values and colors changed bytes red. A nonzero XOR means a difference, not necessarily an additional fault. \texttt{terminal.pause()} only waits when \texttt{--step} was requested; it does not change any cryptographic values.
+
+\texttt{run\_with\_log()} surrounds the complete entry point. The Tee objects duplicate stdout and stderr. The TXT file preserves ANSI sequences; a final HTML conversion renders red differences and green recovery results. A new execution overwrites only the same program's previous log.
+\begin{center}\begin{tabular}{ll}\toprule Command entry point&Log pair\\\midrule
+\texttt{run.py}&\texttt{logs/run.txt}, \texttt{logs/run.html}\\
+\texttt{piret\_sm4.py}&\texttt{logs/piret\_sm4.txt}, \texttt{logs/piret\_sm4.html}\\\bottomrule\end{tabular}\end{center}
+
+\section{Common misunderstandings to avoid}
+\begin{itemize}
+\item A one-byte injected error can spread across a whole word after L.
+\item \(\Delta B=4F000000\) is an S-box output difference, not the mask 01 and not the key.
+\item q is calculated from observable unchanged words, not read from a hidden register.
+\item Multiple candidates mean ambiguity. They are not interchangeable recovered keys.
+\item One recovered round key is insufficient to reverse the complete SM4 schedule.
+\item Earlier-round peeling uses recovered later keys; reference keys are not solver inputs.
+\item This software target accepts exact round/byte/mask requests. A physical clock or voltage glitch does not automatically provide that control.
+\end{itemize}
+
+\section{A short oral explanation}
+\begin{quote}
+I first run normal SM4 to obtain a reference ciphertext. I inject a known byte XOR at a selected final-round S-box input. The ciphertext XOR removes unchanged terms. Inverting the public linear transformation isolates an S-box output difference. I enumerate possible S-box inputs, convert them into key-byte guesses using public words, and intersect independent observations until one value remains. After recovering rk31, I request new faults in earlier rounds and undo only rounds whose keys are already recovered. Four consecutive recovered tail keys let me reverse the key schedule, remove FK and reconstruct the master key. Finally I verify encryption, decryption and simulation ground truth.
+\end{quote}
+
+\input{physical_execution.tex}
+\input{generated/line_by_line.tex}
+
+\appendix
+\chapter{All 32 clean encryption rounds}
+Generated from \texttt{sm4\_fault\_encrypt()} with no fault selected. Every row corresponds to the normal terminal trace for this vector.
+\input{generated/encryption.tex}
+
+\chapter{All observations used in full recovery}
+The fresh set uses one ciphertext pair. The intersection uses every preceding observation for the same round and byte. The displayed bytes are hexadecimal. q is computed after peeling when necessary.
+\input{generated/observations.tex}
+
+\chapter{All inverse-L bit contributions for the first fault}
+Input \(\Delta X=\hx{734E3D3D}\). Bit 0 is the least significant bit. The final running XOR is \(\Delta B=\hx{4F000000}\).
+\input{generated/inverse_bits.tex}
+
+\chapter{All 256 candidate inputs for the first two faults}
+Both observations concern rk31 byte 0. The known byte is \(q=07\). Column \(a\xor07\) converts an input guess to a key guess. Only inputs marked ACCEPT contribute to that observation's fresh set. The solver intersects the resulting \emph{key} sets.
+\input{generated/all_candidates.tex}
+
+\chapter{All 32 inverse key-schedule calculations}
+\(U=K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i\). The final column is \(K_i=K_{i+4}\xor L'(\tau(U))\). Computation runs from \(i=31\) down to zero.
+\input{generated/schedule.tex}
+
+\chapter{Supporting source excerpts with real line numbers}
+These supporting excerpts are regenerated from the actual files whenever this independent PDF is built. The preceding line-by-line chapters already cover all functions in \texttt{piret\_sm4.py} and \texttt{run.py}. This appendix provides the cipher hooks, detailed-event helpers and logging code they use, plus the shared terminal base class. The imports of \texttt{aes} in the SM4 attack provide block-length validation only; no AES key or AES attack equation participates in SM4 recovery.
+
+\texttt{generated/example.json} records the public vector, all observations, recovered keys, clean trace and SHA-256 hashes of the relevant source files. Measured output tables and quoted line numbers can therefore be checked against the code used for this build.
+\input{generated/source_excerpts.tex}
+\end{document}

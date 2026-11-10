@@ -1,0 +1,44 @@
+def sm4_demo(terminal, limit, start_byte=0):
+    """Recover all four final subkeys through faults, then the complete key."""
+    key, plaintext = block(sm4.KEY), block(sm4.PLAINTEXT)
+    correct, trace = sm4_encrypt(plaintext, key)
+    terminal.section("SM4: NORMAL ENCRYPTION")
+    for item in trace:
+        print(f"Round {item['round']:02d}: A={item['a']:08X} B={item['b']:08X} L(B)={item['linear']:08X} new={item['new']:08X}")
+        terminal.pause()
+    print("Ciphertext: " + correct.hex().upper())
+    terminal.section("SM4: FULL MASTER-KEY DFA / ROUNDS 31 -> 28")
+    print("Controlled faults in EACH final round are required. No reference subkeys are supplied.")
+    print("For each byte: undo L, test S(a) XOR S(a XOR mask), then convert a to a subkey guess.")
+    print("Repeat independent faults and intersect guesses. Only one survivor identifies a byte.")
+    recovered_bytes = {}
+
+    # Run the real SM4 cipher with an external fault callback and show teacher-only propagation.
+    def oracle(number, byte, mask):
+        faulty, fault_trace = piret_sm4.sm4_fault_encrypt(plaintext, key, byte, mask, number)
+        attack_steps.emit(terminal, attack_steps.sm4_fault_trace(trace, fault_trace, number, byte, mask))
+        return faulty
+
+    def report(event):
+        show_sm4_observation(terminal, event, recovered_bytes, start_byte)
+
+    result = piret_sm4.recover_sm4_master_key(correct, oracle, range(1, limit+1), start_byte, observer=report)
+    if not result['complete']:
+        print("SM4 recovery remains ambiguous. Increase --observations.")
+        return False
+    for number, value in result['round_keys'].items():
+        print(terminal.paint(f"DFA RECOVERED rk{number} = {value:08X} / PASS", "32"))
+    recovered = show_sm4_key_schedule(terminal, result['round_keys'])
+    if recovered != result['master_key']:
+        raise RuntimeError("Displayed inverse schedule disagrees with the recovery engine.")
+    attack_steps.emit(terminal, attack_steps.verification("sm4", plaintext, recovered, correct))
+    verified_ciphertext = sm4.sm4_encrypt_block(plaintext, recovered)
+    if recovered != key or verified_ciphertext != correct:
+        raise RuntimeError("SM4 full master-key verification failed.")
+    terminal.section("SM4: VERIFY THE RECOVERED MASTER KEY")
+    print("Plaintext:                " + plaintext.hex().upper())
+    print("Expected ciphertext:      " + correct.hex().upper())
+    print("Recovered-key ciphertext: " + verified_ciphertext.hex().upper())
+    print(terminal.paint("SM4 MASTER KEY: " + recovered.hex().upper() + " / PASS", "32"))
+    print(f"{result['used']} faulty outputs. All four subkeys came from DFA, not references.")
+    return True

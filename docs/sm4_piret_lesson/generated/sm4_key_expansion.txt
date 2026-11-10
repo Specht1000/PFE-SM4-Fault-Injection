@@ -1,0 +1,23 @@
+def key_expansion(key: bytes) -> list[int]:
+    """Return rk0..rk31; each is one new word from the key recurrence."""
+
+    if len(key) != BLOCK_SIZE:
+        raise ValueError("SM4 key must contain exactly 16 bytes.")
+
+    master_words = struct.unpack(">4I", key)
+
+    # Whiten the master words with four fixed public FK constants before expansion.
+    schedule_words = []
+
+    for index in range(4):
+        schedule_words.append(master_words[index] ^ FK[index])
+
+
+    for i in range(N_ROUNDS):
+        # Keep previous words for readability; the recurrence consumes a window.
+        next_key = generate_round_key(schedule_words[i:i+4], i)
+
+        schedule_words.append(next_key)
+
+    # The initial four whitened words are not encryption round keys.
+    return schedule_words[4:]

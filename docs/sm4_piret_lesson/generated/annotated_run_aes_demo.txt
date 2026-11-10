@@ -1,0 +1,116 @@
+def aes_demo(terminal, limit, seed):
+    key, plaintext = block(aes.KEY), block(aes.PLAINTEXT)
+
+    terminal.section("AES / PDF CHAPTER 2: ENCRYPTION")
+
+    print("Key: " + key.hex().upper() + "\nPlaintext: " + plaintext.hex().upper())
+    print("AES layout: index = 4*column + row. This execution has no fault.")
+
+    clean, trace = piret_aes.trace_round8(plaintext, key, fault_round=9)
+
+    if clean != piret_aes.aes_target_encrypt(plaintext, key):
+        raise RuntimeError("AES trace differs from aes.py.")
+
+    keys = aes.key_expansion(key)
+
+    for number, round_key in enumerate(keys):
+        print(f"K{number:02d} = {aes.state_to_bytes(round_key).hex().upper()}")
+
+    initial = aes.bytes_to_state(plaintext)
+
+    aes.add_round_key(initial, keys[0])
+
+    print("Initial AddRoundKey: " + aes.state_to_bytes(initial).hex().upper())
+
+    for number, operation, state in trace:
+        if operation != "Fault point":
+            print(f"R{number:02d} {operation:12s}: {state.hex().upper()}")
+            terminal.pause()
+
+    print("Correct ciphertext: " + clean.hex().upper())
+
+    terminal.section("AES / PDF CHAPTER 3: PIRET AT ROUND-9 MIXCOLUMNS INPUT")
+
+    print("Recover one K10 quartet per column; repeat across all four columns.")
+    print("d = InvSbox[C[p] XOR k] XOR InvSbox[F[p] XOR k].")
+    print("Four d values must match one of 4*255 = 1020 MixColumns difference patterns.")
+
+    if limit >= 2:
+        masks = [1, 2] + random.Random(seed).sample(list(range(3, 256)), limit - 2)
+    else:
+        masks = [1]
+
+    last_key, total = bytearray(16), 0
+
+    for column in range(4):
+        survivors = None
+
+        print(f"\nCOLUMN {column}: output/key positions {piret_aes.output_positions(column)}")
+
+        for observation, mask in enumerate(masks, 1):
+            faulty, faulty_trace = piret_aes.trace_round8(plaintext, key, 0, column, mask, fault_round=9)
+            total += 1
+            print(f"\nObservation {observation}: simulator XOR {mask:02X}, row 0 / column {column}.")
+            print("The solver enumerates unknown fault rows/values and does not receive this mask.")
+            references = {}
+
+            for row, op, candidate_state in trace:
+                references[row, op] = candidate_state
+
+            for number, operation, state in faulty_trace:
+                if number >= 9:
+                    print(f"R{number:02d} {operation}")
+                    terminal.compare(references[number, operation], state)
+                    terminal.pause()
+
+            terminal.pair(clean, faulty)
+            attack_steps.emit(terminal, attack_steps.aes_piret(clean, faulty, column, survivors))
+            # Use output differences only; the known target key is excluded from this call.
+            fresh = piret_aes.key_candidates(clean, faulty, column)
+
+            if survivors is None:
+                before = None
+            else:
+                before = len(survivors)
+
+            # Keep guesses satisfying every observation collected for the current column.
+            if survivors is None:
+                survivors = fresh
+            else:
+                survivors = survivors & fresh
+
+            print(f"Candidates in this pair: {len(fresh)}; intersection: {before} -> {len(survivors)}")
+            formatted_values = []
+
+            for candidate in sorted(survivors)[:4]:
+                formatted_values.append(bytes(candidate).hex().upper())
+
+            print('First survivors: ' + ' | '.join(formatted_values))
+            terminal.pause()
+
+            if not survivors:
+                raise RuntimeError("AES candidate intersection is empty.")
+
+            if len(survivors) == 1:
+                for position, value in zip(piret_aes.output_positions(column), next(iter(survivors))):
+                    last_key[position] = value
+
+                break
+        else:
+            print(terminal.paint("AES recovery remains ambiguous. Increase --observations.", "31"))
+            return False
+
+    terminal.section("AES / PDF SECTION 3.6: REVERSE KEY EXPANSION")
+
+    print("Recovered K10: " + bytes(last_key).hex().upper())
+
+    recovered = show_aes_key_schedule(terminal, last_key)
+
+    attack_steps.emit(terminal, attack_steps.verification("aes", plaintext, recovered, clean))
+
+    if recovered != key or piret_aes.aes_target_encrypt(plaintext, recovered) != clean:
+        raise RuntimeError("AES key recovery verification failed.")
+
+    print(terminal.paint(f"AES MASTER KEY: {recovered.hex().upper()} / PASS ({total} faulty outputs)", "32"))
+
+    return True

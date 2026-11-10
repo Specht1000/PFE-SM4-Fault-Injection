@@ -1,0 +1,55 @@
+def recover_sm4_master_key(correct, fault_oracle, masks=(1, 2, 3, 4, 5, 6, 7, 8), start_byte=0, candidate_filter=None, observer=None):
+    """Recover rk31 -> rk28 and reverse the schedule, using outputs only.
+
+    fault_oracle(round, byte, mask) returns a faulty ciphertext. It represents
+    a target capable of a controlled fault in EACH of the final four rounds.
+    The solver receives no master key, schedule, or reference subkeys.
+    The default filter uses known masks; Giraud supplies its single-bit filter.
+    """
+    aes.validate_block(correct, "Correct SM4 ciphertext")
+    masks = tuple(masks)
+    if not masks or len(set(masks)) != len(masks) or any(not 1 <= mask <= 255 for mask in masks) or not 0 <= start_byte < 4:
+        raise ValueError("Use distinct nonzero byte masks and start_byte 0..3.")
+    keys, history, counts, used = {}, [], {}, 0
+    for number in range(31, 27, -1):
+        # Recover later keys first; only those keys may be used for round peeling.
+        clean_view = peel_sm4(correct, number, keys)
+        subkey = bytearray(4)
+        for byte in [(start_byte + offset) % 4 for offset in range(4)]:
+            survivors = None
+            # None means no observation yet, not an empty or failed candidate set.
+            for observation, mask in enumerate(masks, 1):
+                faulty = bytes(fault_oracle(number, byte, mask))
+                # The oracle knows the target secret, but returns only ciphertext.
+                faulty_view = peel_sm4(faulty, number, keys)
+                if candidate_filter is None:
+                    # Default DFA knows the mask; Giraud supplies a different filter.
+                    fresh, inputs, delta = sm4_byte_candidates(clean_view, faulty_view, byte, mask)
+                else:
+                    position, fresh, inputs, delta = candidate_filter(clean_view, faulty_view, mask)
+                    if position != byte:
+                        raise ValueError("Fault observation does not match the requested byte.")
+                before = 256 if survivors is None else len(survivors)
+                survivors = set(fresh) if survivors is None else survivors & fresh
+                # Independent observations can remove candidates, never add them.
+                if not survivors:
+                    raise ValueError("SM4 candidate intersection is empty; fault model is incompatible.")
+                used += 1
+                counts[f"{number}:{byte}"] = len(survivors)
+                event = dict(round=number, byte=byte, observation=observation, mask=mask, before=before, pair_candidates=len(fresh), remaining=len(survivors), survivors=sorted(survivors), inputs=sorted(inputs), delta_b=delta, correct=correct.hex(), faulty=faulty.hex(), clean_view=clean_view.hex(), faulty_view=faulty_view.hex(), peeled_with={str(i): f"{value:08X}" for i, value in keys.items()})
+                history.append(event)
+                if observer is not None:
+                    # Copy event metadata so presentation code cannot edit solver state.
+                    observer(dict(event))
+                if len(survivors) == 1:
+                    # Only uniqueness permits using this byte in a recovered round key.
+                    subkey[byte] = next(iter(survivors))
+                    break
+            else:
+                # The loop exhausted its budget without a unique byte; do not peel
+                # an earlier round with a guessed key or claim a complete master key.
+                return dict(master_key=None, round_keys=keys, history=history, candidate_counts=counts, used=used, complete=False, blocked_round=number)
+        keys[number] = int.from_bytes(subkey, "big")
+    # All four tail keys now come from observations; invert the schedule once.
+    master = reverse_sm4([keys[number] for number in range(28, 32)])
+    return dict(master_key=master, round_keys=keys, history=history, candidate_counts=counts, used=used, complete=True)

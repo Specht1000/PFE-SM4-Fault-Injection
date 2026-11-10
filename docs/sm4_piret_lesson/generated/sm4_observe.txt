@@ -1,0 +1,19 @@
+def observe(observer, number, operation, value):
+    """Optional experiment callback. Normal cipher calls have no observer.
+
+    An observer may return a replacement value, or None to leave it unchanged.
+    Fault coordinates and masks belong to the external attack, never this file.
+    """
+
+    if observer is None:
+        return value
+
+    # Only the external observer can request a replacement; None preserves normal execution.
+    replacement = observer(number, operation, value)
+
+    if replacement is None:
+        result_value = value
+    else:
+        result_value = replacement
+
+    return result_value

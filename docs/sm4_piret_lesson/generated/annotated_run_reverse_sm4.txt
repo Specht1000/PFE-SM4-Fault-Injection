@@ -1,0 +1,4 @@
+def reverse_sm4(final_keys, observer=None):
+    """Compatibility adapter; the attack calculation lives in piret_sm4.py."""
+
+    return piret_sm4.reverse_sm4(final_keys, observer)

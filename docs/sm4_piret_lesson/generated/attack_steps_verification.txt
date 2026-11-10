@@ -1,0 +1,22 @@
+def verification(algorithm, plaintext, key, expected):
+    """Check the recovered key by both forward and inverse block operations."""
+
+    if algorithm == 'aes':
+        encrypt = aes.aes_encrypt
+    else:
+        encrypt = sm4.sm4_encrypt_block
+
+    if algorithm == 'aes':
+        decrypt = aes.aes_decrypt
+    else:
+        decrypt = sm4.sm4_decrypt_block
+
+    # Validate recovered key material through both forward and inverse block operations.
+    actual = encrypt(plaintext, key)
+
+    recovered = decrypt(expected, key)
+
+    if actual != expected or recovered != plaintext:
+        raise RuntimeError('Recovered key failed encryption/decryption verification.')
+
+    return [step(0, "Verify recovered key: encrypt and decrypt", [f"Recovered key = {key.hex().upper()}", f"P = {plaintext.hex().upper()}", f"Expected C = {expected.hex().upper()}", f"Encrypt(P, recovered key) = {actual.hex().upper()} / PASS", f"Decrypt(C, recovered key) = {recovered.hex().upper()} / PASS", "This verifies the observed pair; simulation ground-truth equality is checked separately."], expected)]

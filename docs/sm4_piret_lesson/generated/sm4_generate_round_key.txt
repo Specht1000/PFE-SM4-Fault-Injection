@@ -1,0 +1,9 @@
+def generate_round_key(k: list[int], round: int) -> int:
+    """Compute K[i+4] from four consecutive schedule words and CK[i].
+
+    The parameter name round is retained for callers using keyword arguments.
+    Encryption and expansion share tau, but expansion must use linear_key.
+    """
+
+    # Use public CK for this schedule round; this is not an encryption round key input.
+    return k[0] ^ linear_key(sbox(k[1] ^ k[2] ^ k[3] ^ CK[round]))
