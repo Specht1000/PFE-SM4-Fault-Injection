@@ -12,7 +12,7 @@ import sm4
 import run as console
 import giraud_aes
 import giraud_sm4
-from giraud_common import masks_for, intersect_candidates
+from giraud_common import masks_for, intersect_candidates, SINGLE_BITS
 import attack_steps
 
 AES_KEY = "000102030405060708090a0b0c0d0e0f"
@@ -841,14 +841,23 @@ class CryptoLab:
 
         row.pack(fill="x", pady=8)
 
-        for index, (title, variable) in enumerate([("Row / byte", self.row), ("Start column", self.column)]):
-            self.label(row, title, 10, MUTED).grid(row=0, column=index, sticky="w")
+        # Keep references so these labels can track the selected attack's fault model.
+        self.coordinate_labels = {}
+
+        for index, (name, title, variable) in enumerate([("row", "Row / byte", self.row), ("column", "Start column", self.column)]):
+            label = self.label(row, title, 10, MUTED)
+            label.grid(row=0, column=index, sticky="w")
+            self.coordinate_labels[name] = label
             widget = ttk.Combobox(row, textvariable=variable, values=(0, 1, 2, 3), width=8, state="readonly")
             widget.grid(row=1, column=index, padx=(0, 12), pady=5)
             self.controls.append(widget)
 
-        for title, variable in [("First XOR mask · hex 01..FF", self.mask), ("Maximum faulty observations · 1..20", self.maximum)]:
-            self.label(fault_panel, title, 9, MUTED).pack(anchor="w")
+        self.fault_labels = {}
+
+        for name, title, variable in [("mask", "First XOR mask · hex 01..FF", self.mask), ("maximum", "Maximum faulty observations · 1..20", self.maximum)]:
+            label = self.label(fault_panel, title, 9, MUTED)
+            label.pack(anchor="w")
+            self.fault_labels[name] = label
             widget = tk.Entry(fault_panel, textvariable=variable, bg=CELL, fg=TEXT, insertbackground=ACCENT, relief="flat", font=("Consolas", 11))
             widget.pack(fill="x", ipady=5, pady=(3, 10))
             self.controls.append(widget)
@@ -1074,6 +1083,43 @@ class CryptoLab:
 
         self.known_bit_control.configure(state=computed_value)
 
+        # Retune the fault-parameter labels to the selected attack's model.
+        if is_giraud:
+            self.fault_labels["mask"].configure(text="Single-bit mask · 01 02 04 08 10 20 40 80")
+            self.fault_labels["maximum"].configure(text="Max observations · 1..8 (eight bit positions)")
+
+            if is_sm4:
+                self.coordinate_labels["row"].configure(text="Start byte · 0..3")
+                self.coordinate_labels["column"].configure(text="Column (AES only)")
+            else:
+                self.coordinate_labels["row"].configure(text="Start byte · 0..3")
+                self.coordinate_labels["column"].configure(text="Start column · 0..3")
+
+            # Giraud flips one bit: snap an incompatible Piret mask back to a valid single bit.
+            try:
+                current_mask = int(self.mask.get(), 16)
+            except ValueError:
+                current_mask = None
+
+            if current_mask not in SINGLE_BITS:
+                self.mask.set("01")
+
+            # Only eight distinct single-bit faults exist per byte.
+            try:
+                if self.maximum.get() > 8:
+                    self.maximum.set(8)
+            except tk.TclError:
+                self.maximum.set(8)
+        else:
+            self.fault_labels["mask"].configure(text="First XOR mask · hex 01..FF")
+            self.fault_labels["maximum"].configure(text="Maximum faulty observations · 1..20")
+            self.coordinate_labels["row"].configure(text="Row / byte")
+
+            if is_sm4:
+                self.coordinate_labels["column"].configure(text="Column (AES only)")
+            else:
+                self.coordinate_labels["column"].configure(text="Start column")
+
         if self.report:
             self.status.set("Settings changed · Build lesson to apply. Timeline retains its original inputs.")
 
@@ -1133,11 +1179,14 @@ class CryptoLab:
             if attack:
                 row, column, mask, maximum = self.row.get(), self.column.get(), int(self.mask.get(), 16), self.maximum.get()
 
-                if not (0 <= row < 4 and 0 <= column < 4 and 1 <= mask <= 255 and 1 <= maximum <= 20):
-                    raise ValueError("Fault settings: row/column 0..3, mask 01..FF, observations 1..20.")
+                if not (0 <= row < 4 and 0 <= column < 4):
+                    raise ValueError("Row and column must be 0..3.")
 
                 if self.operation.get() == "Giraud attack":
+                    # Giraud injects a single bit: validate the mask and the 1..8 bound together.
                     masks_for(mask, maximum)
+                elif not (1 <= mask <= 255 and 1 <= maximum <= 20):
+                    raise ValueError("Piret settings: mask 01..FF, observations 1..20.")
         except (ValueError, tk.TclError) as error:
             messagebox.showerror("Invalid input", str(error), parent=self.root)
             return
