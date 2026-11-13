@@ -1,0 +1,52 @@
+\paragraph{Outer iteration: row\_index = 0.}
+Start with \hx{matrix\_row = 0000}.
+\begin{center}\small\begin{tabular}{rllllll}\toprule
+$c$ & $C$ & Shifted & $b$ & Placed & Row before & Row after\\\midrule
+0 & 0101 & 0101 & 1 & 0001 & 0000 & 0001\\
+1 & 0011 & 0011 & 1 & 0010 & 0001 & 0011\\
+2 & 0010 & 0010 & 0 & 0000 & 0011 & 0011\\
+3 & 1000 & 1000 & 0 & 0000 & 0011 & 0011\\
+\bottomrule\end{tabular}\end{center}
+\[\begin{aligned}
+\hx{identity\_bit}&=1\ll(4+0)=16=\hx{00010000},\\
+\hx{augmented\_row}&=\hx{00000011}\,|\,\hx{00010000}=\hx{00010011}.\end{aligned}\]
+Append to \hx{rows}. List so far (hex): \hx{13}.
+\paragraph{Outer iteration: row\_index = 1.}
+Start with \hx{matrix\_row = 0000}.
+\begin{center}\small\begin{tabular}{rllllll}\toprule
+$c$ & $C$ & Shifted & $b$ & Placed & Row before & Row after\\\midrule
+0 & 0101 & 0010 & 0 & 0000 & 0000 & 0000\\
+1 & 0011 & 0001 & 1 & 0010 & 0000 & 0010\\
+2 & 0010 & 0001 & 1 & 0100 & 0010 & 0110\\
+3 & 1000 & 0100 & 0 & 0000 & 0110 & 0110\\
+\bottomrule\end{tabular}\end{center}
+\[\begin{aligned}
+\hx{identity\_bit}&=1\ll(4+1)=32=\hx{00100000},\\
+\hx{augmented\_row}&=\hx{00000110}\,|\,\hx{00100000}=\hx{00100110}.\end{aligned}\]
+Append to \hx{rows}. List so far (hex): \hx{13, 26}.
+\paragraph{Outer iteration: row\_index = 2.}
+Start with \hx{matrix\_row = 0000}.
+\begin{center}\small\begin{tabular}{rllllll}\toprule
+$c$ & $C$ & Shifted & $b$ & Placed & Row before & Row after\\\midrule
+0 & 0101 & 0001 & 1 & 0001 & 0000 & 0001\\
+1 & 0011 & 0000 & 0 & 0000 & 0001 & 0001\\
+2 & 0010 & 0000 & 0 & 0000 & 0001 & 0001\\
+3 & 1000 & 0010 & 0 & 0000 & 0001 & 0001\\
+\bottomrule\end{tabular}\end{center}
+\[\begin{aligned}
+\hx{identity\_bit}&=1\ll(4+2)=64=\hx{01000000},\\
+\hx{augmented\_row}&=\hx{00000001}\,|\,\hx{01000000}=\hx{01000001}.\end{aligned}\]
+Append to \hx{rows}. List so far (hex): \hx{13, 26, 41}.
+\paragraph{Outer iteration: row\_index = 3.}
+Start with \hx{matrix\_row = 0000}.
+\begin{center}\small\begin{tabular}{rllllll}\toprule
+$c$ & $C$ & Shifted & $b$ & Placed & Row before & Row after\\\midrule
+0 & 0101 & 0000 & 0 & 0000 & 0000 & 0000\\
+1 & 0011 & 0000 & 0 & 0000 & 0000 & 0000\\
+2 & 0010 & 0000 & 0 & 0000 & 0000 & 0000\\
+3 & 1000 & 0001 & 1 & 1000 & 0000 & 1000\\
+\bottomrule\end{tabular}\end{center}
+\[\begin{aligned}
+\hx{identity\_bit}&=1\ll(4+3)=128=\hx{10000000},\\
+\hx{augmented\_row}&=\hx{00001000}\,|\,\hx{10000000}=\hx{10001000}.\end{aligned}\]
+Append to \hx{rows}. List so far (hex): \hx{13, 26, 41, 88}.

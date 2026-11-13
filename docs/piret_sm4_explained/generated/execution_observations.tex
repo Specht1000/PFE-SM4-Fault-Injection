@@ -1,0 +1,130 @@
+\subsubsection*{Round 31: input views and the byte loop}
+Before this round, recovered subkeys are:
+\hx{none}.
+The clean view returned by \texttt{peel\_sm4} is
+\[C_{\rm view}=\hx{681EDF34D206965E86B3E94F536E4246}.\]
+The first oracle response for this round and its peeled view are
+\[\begin{aligned}F&=\hx{1B50E209D206965E86B3E94F536E4246},\\F_{\rm view}&=\hx{1B50E209D206965E86B3E94F536E4246}.\end{aligned}\]
+The filter operates on these views. In the table, ``fresh'' is the key-byte set for this pair and ``remaining'' is the intersection with earlier observations for the same byte.
+\begin{center}\small\begin{tabular}{rrrlll}\toprule
+Query & Byte & Mask & $\Delta B$ & Fresh & Remaining\\\midrule
+1 & 0 & 01 & 4F000000 & 90 91 & 90 91\\
+2 & 0 & 02 & 81000000 & 70 72 91 93 & 91\\
+3 & 1 & 01 & 00710000 & 24 25 & 24 25\\
+4 & 1 & 02 & 00830000 & 24 26 & 24\\
+5 & 2 & 01 & 00007900 & A0 A1 & A0 A1\\
+6 & 2 & 02 & 00006F00 & A0 A2 & A0\\
+7 & 3 & 01 & 00000080 & 12 13 & 12 13\\
+8 & 3 & 02 & 000000C9 & 10 12 & 12\\
+\bottomrule\end{tabular}\end{center}
+Unique bytes are written into the subkey buffer in the following order. Zero-filled positions not yet written are placeholders, not recovered bytes.
+\begin{center}\small\begin{tabular}{rrlr}\toprule
+Byte written & Value & Buffer after write & Queries used\\\midrule
+0 & 91 & 91000000 & 2\\
+1 & 24 & 91240000 & 4\\
+2 & A0 & 9124A000 & 6\\
+3 & 12 & 9124A012 & 8\\
+\bottomrule\end{tabular}\end{center}
+Only now is \texttt{keys[31]} assigned: $rk_{31}=\hx{9124A012}$. This word may be used to peel the next attacked round.
+\subsubsection*{Round 30: input views and the byte loop}
+Before this round, recovered subkeys are:
+\hx{rk31=9124A012}.
+The clean view returned by \texttt{peel\_sm4} is
+\[C_{\rm view}=\hx{D206965E86B3E94F536E42467B938F4C}.\]
+For the clean ciphertext, the peeling calls perform the following actual calculations in order. The last column is the recovered older state word:
+\begin{center}\small\begin{tabular}{rllll}\toprule
+Undone round & S-box input & $\tau$ output & $L$ output & Older word\\\midrule
+31 & 96FF9D45 & 1A488C73 & 138D5078 & 7B938F4C\\
+\bottomrule\end{tabular}\end{center}
+The first oracle response for this round and its peeled view are
+\[\begin{aligned}F&=\hx{AE21A70A772712DA86B3E94F536E4246},\\F_{\rm view}&=\hx{772712DA86B3E94F536E42467B938F4C}.\end{aligned}\]
+The filter operates on these views. In the table, ``fresh'' is the key-byte set for this pair and ``remaining'' is the intersection with earlier observations for the same byte.
+\begin{center}\small\begin{tabular}{rrrlll}\toprule
+Query & Byte & Mask & $\Delta B$ & Fresh & Remaining\\\midrule
+9 & 0 & 01 & 21000000 & 00 01 & 00 01\\
+10 & 0 & 02 & 3C000000 & 01 03 & 01\\
+11 & 1 & 01 & 00550000 & CE CF & CE CF\\
+12 & 1 & 02 & 006D0000 & CD CF & CF\\
+13 & 2 & 01 & 00005100 & 72 73 & 72 73\\
+14 & 2 & 02 & 0000AB00 & 70 72 & 72\\
+15 & 3 & 01 & 000000EB & E4 E5 & E4 E5\\
+16 & 3 & 02 & 000000FF & E5 E7 & E5\\
+\bottomrule\end{tabular}\end{center}
+Unique bytes are written into the subkey buffer in the following order. Zero-filled positions not yet written are placeholders, not recovered bytes.
+\begin{center}\small\begin{tabular}{rrlr}\toprule
+Byte written & Value & Buffer after write & Queries used\\\midrule
+0 & 01 & 01000000 & 10\\
+1 & CF & 01CF0000 & 12\\
+2 & 72 & 01CF7200 & 14\\
+3 & E5 & 01CF72E5 & 16\\
+\bottomrule\end{tabular}\end{center}
+Only now is \texttt{keys[30]} assigned: $rk_{30}=\hx{01CF72E5}$. This word may be used to peel the next attacked round.
+\subsubsection*{Round 29: input views and the byte loop}
+Before this round, recovered subkeys are:
+\hx{rk31=9124A012, rk30=01CF72E5}.
+The clean view returned by \texttt{peel\_sm4} is
+\[C_{\rm view}=\hx{86B3E94F536E42467B938F4C893450AD}.\]
+For the clean ciphertext, the peeling calls perform the following actual calculations in order. The last column is the recovered older state word:
+\begin{center}\small\begin{tabular}{rllll}\toprule
+Undone round & S-box input & $\tau$ output & $L$ output & Older word\\\midrule
+31 & 96FF9D45 & 1A488C73 & 138D5078 & 7B938F4C\\
+30 & AF8156A0 & 6FBFDA1D & 5B32C6F3 & 893450AD\\
+\bottomrule\end{tabular}\end{center}
+The first oracle response for this round and its peeled view are
+\[\begin{aligned}F&=\hx{FD15CC075271D40B4F8E1DBB536E4246},\\F_{\rm view}&=\hx{4F8E1DBB536E42467B938F4C893450AD}.\end{aligned}\]
+The filter operates on these views. In the table, ``fresh'' is the key-byte set for this pair and ``remaining'' is the intersection with earlier observations for the same byte.
+\begin{center}\small\begin{tabular}{rrrlll}\toprule
+Query & Byte & Mask & $\Delta B$ & Fresh & Remaining\\\midrule
+17 & 0 & 01 & 3D000000 & 62 63 & 62 63\\
+18 & 0 & 02 & 89000000 & 60 62 & 62\\
+19 & 1 & 01 & 00E00000 & 28 29 & 28 29\\
+20 & 1 & 02 & 001E0000 & 29 2B & 29\\
+21 & 2 & 01 & 0000E900 & 34 35 & 34 35\\
+22 & 2 & 02 & 00008200 & 34 36 & 34\\
+23 & 3 & 01 & 00000057 & 96 97 & 96 97\\
+24 & 3 & 02 & 0000001A & 94 96 & 96\\
+\bottomrule\end{tabular}\end{center}
+Unique bytes are written into the subkey buffer in the following order. Zero-filled positions not yet written are placeholders, not recovered bytes.
+\begin{center}\small\begin{tabular}{rrlr}\toprule
+Byte written & Value & Buffer after write & Queries used\\\midrule
+0 & 62 & 62000000 & 18\\
+1 & 29 & 62290000 & 20\\
+2 & 34 & 62293400 & 22\\
+3 & 96 & 62293496 & 24\\
+\bottomrule\end{tabular}\end{center}
+Only now is \texttt{keys[29]} assigned: $rk_{29}=\hx{62293496}$. This word may be used to peel the next attacked round.
+\subsubsection*{Round 28: input views and the byte loop}
+Before this round, recovered subkeys are:
+\hx{rk31=9124A012, rk30=01CF72E5, rk29=62293496}.
+The clean view returned by \texttt{peel\_sm4} is
+\[C_{\rm view}=\hx{536E42467B938F4C893450AD6FE46B75}.\]
+For the clean ciphertext, the peeling calls perform the following actual calculations in order. The last column is the recovered older state word:
+\begin{center}\small\begin{tabular}{rllll}\toprule
+Undone round & S-box input & $\tau$ output & $L$ output & Older word\\\midrule
+31 & 96FF9D45 & 1A488C73 & 138D5078 & 7B938F4C\\
+30 & AF8156A0 & 6FBFDA1D & 5B32C6F3 & 893450AD\\
+29 & C3E0A931 & 928929B3 & E957823A & 6FE46B75\\
+\bottomrule\end{tabular}\end{center}
+The first oracle response for this round and its peeled view are
+\[\begin{aligned}F&=\hx{84EB762070DAF490AA919B05476A5256},\\F_{\rm view}&=\hx{476A52567B938F4C893450AD6FE46B75}.\end{aligned}\]
+The filter operates on these views. In the table, ``fresh'' is the key-byte set for this pair and ``remaining'' is the intersection with earlier observations for the same byte.
+\begin{center}\small\begin{tabular}{rrrlll}\toprule
+Query & Byte & Mask & $\Delta B$ & Fresh & Remaining\\\midrule
+25 & 0 & 01 & 04000000 & 42 43 & 42 43\\
+26 & 0 & 02 & 55000000 & 40 42 & 42\\
+27 & 1 & 01 & 00820000 & 8C 8D & 8C 8D\\
+28 & 1 & 02 & 00450000 & 8D 8F & 8D\\
+29 & 2 & 01 & 00005800 & 36 37 & 36 37\\
+30 & 2 & 02 & 00006000 & 34 36 & 36\\
+31 & 3 & 01 & 00000096 & 54 55 & 54 55\\
+32 & 3 & 02 & 00000022 & 54 56 & 54\\
+\bottomrule\end{tabular}\end{center}
+Unique bytes are written into the subkey buffer in the following order. Zero-filled positions not yet written are placeholders, not recovered bytes.
+\begin{center}\small\begin{tabular}{rrlr}\toprule
+Byte written & Value & Buffer after write & Queries used\\\midrule
+0 & 42 & 42000000 & 26\\
+1 & 8D & 428D0000 & 28\\
+2 & 36 & 428D3600 & 30\\
+3 & 54 & 428D3654 & 32\\
+\bottomrule\end{tabular}\end{center}
+Only now is \texttt{keys[28]} assigned: $rk_{28}=\hx{428D3654}$. The four required subkeys are now known; leave the round loop and reverse the key schedule.

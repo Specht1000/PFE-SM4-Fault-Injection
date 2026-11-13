@@ -18,8 +18,10 @@ Only the DFA functions are stepped; the SM4 cipher itself runs as a black box.
 Run:  python src/debug_piret_sm4.py
 """
 import builtins
+from collections import ChainMap
 import io
 import keyword
+import linecache
 import os
 import queue
 import sys
@@ -28,6 +30,7 @@ import tkinter as tk
 import tokenize
 from tkinter import ttk
 import piret_sm4 as P
+from debug_sm4 import equation
 
 # Width of the line-number gutter rendered before each source line.
 GUTTER_W = 6
@@ -160,12 +163,14 @@ class StepEngine:
         self.out_queue = queue.Queue()   # worker -> UI step/result messages
         self.thread = None
         self.prev_locals = {}            # id(frame) -> last formatted locals
+        self.prev_equations = {}         # previous statement in each live frame
         self.mode = "step"               # step | run | finish
         self.finish_frame = None         # the frame "Finish fn" is waiting to exit
 
     def start(self, scenario):
         # Reset state and launch the scenario in a fresh daemon thread.
         self.prev_locals = {}
+        self.prev_equations = {}
         self.mode = "step"
         self.finish_frame = None
         # Drain any stale commands left from a previous run.
@@ -214,6 +219,7 @@ class StepEngine:
             self._pause(frame)
         elif event == "return":
             self.prev_locals.pop(id(frame), None)
+            self.prev_equations.pop(id(frame), None)
         return self._local
 
     def _pause(self, frame):
@@ -229,6 +235,25 @@ class StepEngine:
         # mutations like bytearray/set edits are detected too).
         changed = [name for name in locs if old.get(name) != locs[name]]
         self.prev_locals[id(frame)] = locs
+
+        # Freeze the equation while its operands still have their pre-line values.
+        # Rendering never evaluates calls or changes the live computation.
+        source = linecache.getline(frame.f_code.co_filename, lineno).strip()
+        numeric = equation(source, ChainMap(frame.f_locals, frame.f_globals))
+        calculation = "NEXT LINE (not executed yet)\n" + numeric
+        previous = self.prev_equations.get(id(frame))
+
+        if previous is not None:
+            calculation += "\n\nPREVIOUS LINE\n" + previous
+            results = []
+
+            for name in changed:
+                results.append(name + " = " + locs[name])
+
+            if results:
+                calculation += "\nRESULT\n" + "\n".join(results)
+
+        self.prev_equations[id(frame)] = numeric
 
         # Fast-forward modes skip the pause entirely so the worker runs on:
         if self.mode == "run":
@@ -249,6 +274,7 @@ class StepEngine:
         self.out_queue.put({
             "type": "step", "func": func, "line": lineno,
             "locals": locs, "changed": changed, "depth": depth,
+            "calculation": calculation,
         })
 
         # BLOCK the worker until the UI puts a command back. This is the handshake
@@ -343,6 +369,17 @@ class DebuggerApp:
         self.action = self._lbl(right, "", 10, GREEN)
         self.action.configure(wraplength=410, justify="left")
         self.action.pack(anchor="w", pady=(2, 8))
+
+        # Add numerical detail within the existing right-hand panel; retain the
+        # source view, variable table, original theme and stepping controls.
+        self._lbl(right, "Calculation / substituted values", 10, MUTED).pack(anchor="w")
+        calculation_wrap = tk.Frame(right, bg=PANEL)
+        calculation_wrap.pack(fill="x", pady=(4, 10))
+        self.calculation = tk.Text(calculation_wrap, height=9, bg=CELL, fg=CYAN, font=("Consolas", 10), wrap="word", relief="flat", padx=8, pady=8)
+        calculation_scroll = ttk.Scrollbar(calculation_wrap, command=self.calculation.yview)
+        self.calculation.configure(yscrollcommand=calculation_scroll.set, state="disabled")
+        calculation_scroll.pack(side="right", fill="y")
+        self.calculation.pack(fill="x", expand=True)
 
         self._lbl(right, "Local variables", 10, MUTED).pack(anchor="w")
         table_wrap = tk.Frame(right, bg=BG)
@@ -476,6 +513,7 @@ class DebuggerApp:
         self._enable_controls(True)
         self.where.configure(text="Starting…")
         self.action.configure(text="")
+        self._show_calculation("")
         for item in self.vars.get_children():
             self.vars.delete(item)
 
@@ -542,6 +580,8 @@ class DebuggerApp:
     def _show_step(self, message):
         func, lineno = message["func"], message["line"]
         self.where.configure(text=f"{func}()   line {lineno}   depth {message['depth']}")
+        self._show_calculation(message.get("calculation", ""))
+        print(f"{func}:{lineno}\n{message.get('calculation', '')}", flush=True)
 
         changed = message["changed"]
         if changed:
@@ -559,6 +599,12 @@ class DebuggerApp:
 
         self._highlight_line(lineno)
         self.counter.configure(text=f"steps: {self.steps}")
+
+    def _show_calculation(self, content):
+        self.calculation.configure(state="normal")
+        self.calculation.delete("1.0", "end")
+        self.calculation.insert("1.0", content)
+        self.calculation.configure(state="disabled")
 
     def _highlight_line(self, lineno):
         # Move the green "current line" background to this line.
@@ -588,4 +634,5 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "debug_piret_sm4"))

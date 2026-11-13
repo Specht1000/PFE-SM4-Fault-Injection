@@ -1,0 +1,17 @@
+{
+  "source_sha256": "424717e680ab76021831a9a6eaa490161342f43b21d4c8d086297ee97c051032",
+  "covered_functions": [
+    "sm4_fault_encrypt",
+    "observer",
+    "inverse_rows",
+    "inverse_linear",
+    "sm4_byte_candidates",
+    "reverse_sm4",
+    "peel_sm4",
+    "recover_sm4_master_key",
+    "main"
+  ],
+  "faulty_outputs": 32,
+  "master_key": "0123456789abcdeffedcba9876543210",
+  "verified": true
+}

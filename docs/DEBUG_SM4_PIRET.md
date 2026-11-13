@@ -1,5 +1,50 @@
 # Debug the complete SM4 Piret demonstration
 
+## Original debugger GUI with numerical equations
+
+Run the established source-and-variables debugger:
+
+```powershell
+python src/debug_piret_sm4.py
+```
+
+Alternatively select **SM4 Piret: original GUI with calculations** in Run and
+Debug. `python src/debug_sm4.py` opens the same interface. The syntax-colored
+source, local-variable table, theme, scenario selector and original stepping
+controls are preserved.
+
+The added calculation panel displays the next line with numerical operands,
+explicitly marked as not executed yet. After stepping, it shows the previous
+line's substituted expression and the variables that actually changed.
+Calls are never executed a second time to explain an equation. The live worker
+still pauses at each source line; there is no full-run recording delay.
+
+For the pictured statement, the panel shows:
+
+```text
+Source:       byte_order.append((start_byte + offset) % 4)
+Substitution: byte_order.append((0 + 1) % 4)
+Actual value: byte_order = [0, 1]
+```
+
+- **Step:** advance one source line.
+- **Finish fn:** use the original function-finish control.
+- **Run to end:** finish the selected scenario.
+- **Auto / Pause:** use the original timer-driven stepping.
+- **Restart:** start the selected scenario again.
+
+The GUI steps the attack functions while the normal cipher runs as a black box.
+This is software fault simulation, not a board connection. The additional
+numerical panel does not change how stepping or the attack works.
+
+Displayed equations go to `logs/debug_piret_sm4.txt` and its HTML counterpart
+when launched directly. These files are overwritten for each session.
+The optional headless recorder remains available through
+`python src/debug_sm4.py --record-only`; it saves the complete JSON trace without
+opening another interface.
+
+## Ordinary live Python debugger
+
 Open the repository root in VS Code. Install Microsoft's Python and Python
 Debugger extensions if they are missing, and select the project interpreter.
 Open Run and Debug with Ctrl+Shift+D, select **SM4 Piret: full key recovery**,

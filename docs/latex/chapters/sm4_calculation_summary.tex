@@ -1,0 +1,114 @@
+\chapter{SM4 DFA: How the Calculations Work}
+\label{chap:complete_calculations}
+This chapter explains the method with short numerical examples. Repeated matrix
+operations, exhaustive candidate lists and the 32 individual reverse-schedule
+steps are omitted; the same rules apply to each remaining bit, byte or round.
+
+\section{Undoing the linear transformation}
+For an isolated last-round fault, XOR cancels the unchanged older state word:
+\[
+\Delta X_{35}=L(B)\xor L(B')=L(B\xor B')=L(\Delta B).
+\]
+Therefore the attacker needs $\Delta B=L^{-1}(\Delta X_{35})$. This operation
+uses only the public SM4 transformation, not the secret key.
+
+The data diffusion map is
+\[
+L(B)=B\xor(B\rol2)\xor(B\rol10)\xor(B\rol18)\xor(B\rol24).
+\]
+For example, $B=\hex{4F000000}$ gives $L(B)=\hex{734E3D3D}$.
+The inverse restores the localized S-box output difference:
+\[
+L^{-1}(\hex{734E3D3D})=\boxed{\hex{4F000000}}.
+\]
+The nonzero first byte is $\hex{4F}$. Several changed ciphertext bytes can
+therefore originate from one affected S-box byte.
+
+\section{How the inverse matrix is obtained}
+Each 32-bit word is a vector of 32 bits. Since XOR and fixed rotations are
+linear over GF(2), $L$ has a binary $32\times32$ matrix $M$.
+Apply $L$ to each basis word $2^i$: the result supplies column $i$ of $M$.
+For example,
+\[
+L(\hex{00000001})=\hex{01040405}.
+\]
+To invert $M$, augment it with the identity and perform Gaussian elimination:
+\[
+[M\mid I]\ \longrightarrow\ [I\mid M^{-1}].
+\]
+For each column, choose a row containing a 1 as the pivot, swap it into place,
+and XOR it into every other row containing a 1 in that column. Over GF(2),
+subtraction is XOR; no division is needed because the only nonzero pivot is 1.
+The function \texttt{inverse\_rows()} prepares these inverse rows once and
+caches them. It does not process a particular ciphertext difference.
+
+\section{How the inverse is applied to a value}
+The function \texttt{inverse\_linear(value)} uses those rows to compute the
+32 result bits. For inverse row $r_j$ and input $d$:
+\[
+t_j=r_j\mathbin{\&}d,\qquad
+b_j=\operatorname{popcount}(t_j)\bmod2.
+\]
+AND selects the input bits that participate in this output bit. Their XOR is
+their parity: an odd number of ones gives 1; an even number gives 0.
+For example, using $d=\hex{734E3D3D}$ and the first inverse row:
+\[
+\hex{51154505}\mathbin{\&}\hex{734E3D3D}=\hex{51040505}.
+\]
+There are eight set bits, so result bit 0 is $8\bmod2=0$.
+Repeating this for the other rows and placing each bit at its index produces
+$\hex{4F000000}$. Bit index 0 means the least significant bit, whereas byte
+index 0 in the attack means the most significant byte.
+
+\section{From a difference to a subkey byte}
+For a known error mask $e$, test all 256 possible S-box inputs $a$ against
+\[
+S(a)\xor S(a\xor e)=d.
+\]
+In the worked example, $e_1=\hex{01}$ and $d_1=\hex{4F}$ leave
+$\mathcal A_1=\{\hex{96},\hex{97}\}$. A second observation,
+$e_2=\hex{02}$ and $d_2=\hex{81}$, leaves
+$\mathcal A_2=\{\hex{75},\hex{77},\hex{94},\hex{96}\}$.
+Their intersection is $\{\hex{96}\}$.
+
+The three unchanged ciphertext words provide
+\[
+q=\operatorname{byte}_0(\hex{D206965E}\xor\hex{86B3E94F}
+\xor\hex{536E4246})=\hex{07}.
+\]
+Since $a=q\xor rk_{31}[0]$, the recovered byte is
+\[
+rk_{31}[0]=\hex{96}\xor\hex{07}=\boxed{\hex{91}}.
+\]
+The other three bytes follow the same procedure. A byte is accepted only when
+its candidate intersection is unique. The unknown-bit Giraud-inspired variant
+instead accepts any of the eight one-bit masks for each observation, which can
+leave more candidates; Section~\ref{sec:four_sm4_configurations} defines all four
+experimental configurations.
+
+\section{Recovering earlier subkeys and the master key}
+After recovering $rk_{31}$, undo that round using
+\[
+X_{31}=X_{35}\xor
+L\bigl(\tau(X_{32}\xor X_{33}\xor X_{34}\xor rk_{31})\bigr).
+\]
+Apply this reconstruction to both clean and faulty ciphertexts. New faults
+targeting round 30 then reveal $rk_{30}$ using the same byte filter. Repeat
+for rounds 29 and 28, always peeling only rounds whose keys are already known.
+One recovered 32-bit subkey does not reveal the complete 128-bit master key.
+
+With four consecutive subkeys, reverse the schedule by XORing the known
+transformed term back out:
+\[
+K_i=K_{i+4}\xor T'(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i).
+\]
+For instance, $K_{32},K_{33},K_{34},K_{35}$ are respectively
+$\hex{428D3654}$, $\hex{62293496}$, $\hex{01CF72E5}$ and $\hex{9124A012}$.
+Using the public constant $CK_{31}=\hex{646B7279}$ yields
+$K_{31}=\hex{F1780C81}$. Here $T'=L'\circ\tau$, with
+$L'(Z)=Z\xor(Z\rol13)\xor(Z\rol23)$; its rotations differ from those of $L$.
+Continue down to $K_0,\ldots,K_3$, remove the fixed constants
+$MK_i=K_i\xor FK_i$, and concatenate the four words.
+The example yields $MK=\hex{0123456789ABCDEFFEDCBA9876543210}$.
+Finally, regenerate the subkeys and check encryption and decryption with the
+recovered key.

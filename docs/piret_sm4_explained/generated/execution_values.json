@@ -1,0 +1,809 @@
+{
+  "plaintext": "0123456789abcdeffedcba9876543210",
+  "correct": "681edf34d206965e86b3e94f536e4246",
+  "master_key": "0123456789abcdeffedcba9876543210",
+  "observations": [
+    {
+      "round": 31,
+      "byte": 0,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        144,
+        145
+      ],
+      "inputs": [
+        150,
+        151
+      ],
+      "delta_b": 1325400064,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "1b50e209d206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "1b50e209d206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 31,
+      "byte": 0,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 4,
+      "remaining": 1,
+      "survivors": [
+        145
+      ],
+      "inputs": [
+        117,
+        119,
+        148,
+        150
+      ],
+      "delta_b": 2164260864,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "ed9dd932d206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "ed9dd932d206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 31,
+      "byte": 1,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        36,
+        37
+      ],
+      "inputs": [
+        254,
+        255
+      ],
+      "delta_b": 7405568,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "adabaff1d206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "adabaff1d206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 31,
+      "byte": 1,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        36
+      ],
+      "inputs": [
+        253,
+        255
+      ],
+      "delta_b": 8585216,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "66915e3ad206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "66915e3ad206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 31,
+      "byte": 2,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        160,
+        161
+      ],
+      "inputs": [
+        156,
+        157
+      ],
+      "delta_b": 30976,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "8dfb424cd206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "8dfb424cd206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 31,
+      "byte": 2,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        160
+      ],
+      "inputs": [
+        157,
+        159
+      ],
+      "delta_b": 28416,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "d5a30c5ad206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "d5a30c5ad206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 31,
+      "byte": 3,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        18,
+        19
+      ],
+      "inputs": [
+        68,
+        69
+      ],
+      "delta_b": 128,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "ea1cddb4d206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "ea1cddb4d206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 31,
+      "byte": 3,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        18
+      ],
+      "inputs": [
+        69,
+        71
+      ],
+      "delta_b": 201,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "a239f8d9d206965e86b3e94f536e4246",
+      "clean_view": "681edf34d206965e86b3e94f536e4246",
+      "faulty_view": "a239f8d9d206965e86b3e94f536e4246",
+      "peeled_with": {}
+    },
+    {
+      "round": 30,
+      "byte": 0,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        0,
+        1
+      ],
+      "inputs": [
+        174,
+        175
+      ],
+      "delta_b": 553648128,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "ae21a70a772712da86b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "772712da86b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 30,
+      "byte": 0,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        1
+      ],
+      "inputs": [
+        173,
+        175
+      ],
+      "delta_b": 1006632960,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "783571121e3a66ae86b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "1e3a66ae86b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 30,
+      "byte": 1,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        206,
+        207
+      ],
+      "inputs": [
+        128,
+        129
+      ],
+      "delta_b": 5570560,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "0915edbf8707c20b86b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "8707c20b86b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 30,
+      "byte": 1,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        207
+      ],
+      "inputs": [
+        129,
+        131
+      ],
+      "delta_b": 7143424,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "e63f967667dffaeb86b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "67dffaeb86b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 30,
+      "byte": 2,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        114,
+        115
+      ],
+      "inputs": [
+        86,
+        87
+      ],
+      "delta_b": 20736,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "48af13209743830e86b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "9743830e86b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 30,
+      "byte": 2,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        114
+      ],
+      "inputs": [
+        84,
+        86
+      ],
+      "delta_b": 43776,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "58090a007ca891f786b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "7ca891f786b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 30,
+      "byte": 3,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        228,
+        229
+      ],
+      "inputs": [
+        160,
+        161
+      ],
+      "delta_b": 235,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "a8470e9f3aa9391986b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "3aa9391986b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 30,
+      "byte": 3,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        229
+      ],
+      "inputs": [
+        160,
+        162
+      ],
+      "delta_b": 255,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "8304c1a32ef9695d86b3e94f536e4246",
+      "clean_view": "d206965e86b3e94f536e42467b938f4c",
+      "faulty_view": "2ef9695d86b3e94f536e42467b938f4c",
+      "peeled_with": {
+        "31": "9124A012"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 0,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        98,
+        99
+      ],
+      "inputs": [
+        194,
+        195
+      ],
+      "delta_b": 1023410176,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "fd15cc075271d40b4f8e1dbb536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "4f8e1dbb536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 0,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        98
+      ],
+      "inputs": [
+        193,
+        195
+      ],
+      "delta_b": 2298478592,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "ebe8eee3ff2987552b38cf69536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "2b38cf69536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 1,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        40,
+        41
+      ],
+      "inputs": [
+        224,
+        225
+      ],
+      "delta_b": 14680064,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "659583967533556505d30acc536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "05d30acc536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 1,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        41
+      ],
+      "inputs": [
+        224,
+        226
+      ],
+      "delta_b": 1966080,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "baa7af661ab7e2bafed5f737536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "fed5f737536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 2,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        52,
+        53
+      ],
+      "inputs": [
+        168,
+        169
+      ],
+      "delta_b": 59648,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "95f80a2a01b2dc7d2114a4a5536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "2114a4a5536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 2,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        52
+      ],
+      "inputs": [
+        169,
+        171
+      ],
+      "delta_b": 33280,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "71177fe030352e598cb963cf536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "8cb963cf536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 3,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        150,
+        151
+      ],
+      "inputs": [
+        48,
+        49
+      ],
+      "delta_b": 87,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "1d89842d9f243532d0eeb444536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "d0eeb444536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 29,
+      "byte": 3,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        150
+      ],
+      "inputs": [
+        49,
+        51
+      ],
+      "delta_b": 26,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "81d8d973abaf1b769cdb813d536e4246",
+      "clean_view": "86b3e94f536e42467b938f4c893450ad",
+      "faulty_view": "9cdb813d536e42467b938f4c893450ad",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 0,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        66,
+        67
+      ],
+      "inputs": [
+        222,
+        223
+      ],
+      "delta_b": 67108864,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "84eb762070daf490aa919b05476a5256",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "476a52567b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 0,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        66
+      ],
+      "inputs": [
+        221,
+        223
+      ],
+      "delta_b": 1426063360,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "eb1bf2b9d73582993a3d0e8b523a1713",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "523a17137b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 1,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        140,
+        141
+      ],
+      "inputs": [
+        206,
+        207
+      ],
+      "delta_b": 8519680,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "eb1d83a5c2b1b7178b089ea459e4c24c",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "59e4c24c7b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 1,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        141
+      ],
+      "inputs": [
+        204,
+        206
+      ],
+      "delta_b": 4521984,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "fb3f31a8321cc43fbdd6ce4d463f0653",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "463f06537b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 2,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        54,
+        55
+      ],
+      "inputs": [
+        130,
+        131
+      ],
+      "delta_b": 22528,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "f6040e487185a80d6468df1d320f7a1f",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "320f7a1f7b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 2,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        54
+      ],
+      "inputs": [
+        128,
+        130
+      ],
+      "delta_b": 24576,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "48c67466f683335fc8314debd2efa227",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "d2efa2277b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 3,
+      "observation": 1,
+      "mask": 1,
+      "before": 256,
+      "pair_candidates": 2,
+      "remaining": 2,
+      "survivors": [
+        84,
+        85
+      ],
+      "inputs": [
+        192,
+        193
+      ],
+      "delta_b": 150,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "1df192bcaaa524679b3d5375c7341888",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "c73418887b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    },
+    {
+      "round": 28,
+      "byte": 3,
+      "observation": 2,
+      "mask": 2,
+      "before": 2,
+      "pair_candidates": 2,
+      "remaining": 1,
+      "survivors": [
+        84
+      ],
+      "inputs": [
+        192,
+        194
+      ],
+      "delta_b": 34,
+      "correct": "681edf34d206965e86b3e94f536e4246",
+      "faulty": "c67bfaf6143f43910ff461f771e6caec",
+      "clean_view": "536e42467b938f4c893450ad6fe46b75",
+      "faulty_view": "71e6caec7b938f4c893450ad6fe46b75",
+      "peeled_with": {
+        "31": "9124A012",
+        "30": "01CF72E5",
+        "29": "62293496"
+      }
+    }
+  ],
+  "round_keys": {
+    "31": 2435096594,
+    "30": 30372581,
+    "29": 1646867606,
+    "28": 1116550740
+  },
+  "faulty_outputs": 32,
+  "terminal_exit_code": 0
+}

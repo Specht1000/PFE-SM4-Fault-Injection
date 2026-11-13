@@ -77,23 +77,26 @@ characterised). The condition tightens to a \emph{single} allowed value,
 \end{description}
 
 \noindent Both variants recover the full key; they differ in how many
-observations that takes. In the project's measured campaigns (ten random keys
-each, one byte per observation), the medians were:
+observations that takes. The table distinguishes the earlier ten-key AES
+campaign from the 100-trial paired SM4 comparison; one byte is targeted per observation:
 
 \begin{center}
 \begin{tabular}{llcc}\toprule
 Cipher & Variant & Verified recoveries & Faulty ciphertexts (median [min--max]) \\\midrule
 AES-128 & Giraud-known   & 10/10 & 32 \,[32--32] \\
 AES-128 & Giraud-unknown & 10/10 & 34.5 \,[32--37] \\
-SM4     & Giraud-known   & 10/10 & 32 \,[32--32] \\
-SM4     & Giraud-unknown & 10/10 & 34.6 \,[32--38] \\\bottomrule
+SM4     & Giraud-known   & 100/100 & 32 \,[32--32] \\
+SM4     & Giraud-unknown & 100/100 & 35 \,[32--40] \\\bottomrule
 \end{tabular}
 \end{center}
 
-\noindent The known-bit variant settles at the structural minimum of thirty-two
+\noindent The SM4 rows use the separate 100-trial paired comparison; the AES rows
+refer to the earlier ten-trial campaign. These sample sizes must not be pooled.
+The known-bit variant uses thirty-two
 faults (two one-bit faults on each of the sixteen targeted bytes for AES, and the
 analogous count for SM4), while the unknown-bit variant occasionally needs a few
 extra faults because the eight-value filter leaves more candidates to eliminate.
+These observed counts are not a universal physical minimum.
 Contrast this with Piret in the round-8 model, which recovers the whole AES
 last-round key from a median of only two faulty ciphertexts
 (Section~\ref{sec:piret_two_models}): Piret pays with a more diffused fault and

@@ -25,15 +25,16 @@ what differential fault analysis needs.
 \item[Clock glitching.] When the attacker controls the device clock, inserting
 one abnormally short clock period forces a register to sample before the slowest
 combinational path has settled. The bits on the slow paths latch incorrectly.
-It is highly repeatable and is the method most able to approach a one- or
-few-bit fault, but it only applies to targets that run from an external,
-attacker-supplied clock. This is the mechanism exercised on the project's STM32
-target.
+The resulting fault depends on the implementation and timing. In the
+ChipWhisperer-Lite setup, clock injection requires an accessible target clock
+path. No single-bit accuracy or completed physical STM32 campaign is established
+by the software experiments in this report.
 \item[Voltage glitching.] A brief, sharp drop (or spike) on the supply rail slows
 gate switching so that, again, logic fails to settle in time. It needs no clock
 access and little equipment --- a transistor pulling the rail low (a ``crowbar'')
 is enough --- which makes it one of the most widely used techniques. Its spatial
-and bit-level precision is lower than clock glitching.
+and bit-level precision depends on the target and experimental arrangement;
+neither method guarantees a selected bit flip.
 \item[Electromagnetic (EM) pulse injection.] A small coil held over the package
 emits a fast magnetic pulse that induces transient currents in nearby logic. It
 is contactless, needs no decapsulation, and can be aimed at a region of the die,
@@ -139,14 +140,17 @@ already names the attacked key byte.
 Not knowing the exact value does not break the attack either; it only weakens the
 filter.
 \begin{center}
-\begin{tabular}{P{.16\linewidth}P{.3\linewidth}P{.28\linewidth}P{.16\linewidth}}\toprule
+\begin{tabular}{P{.16\linewidth}P{.27\linewidth}P{.27\linewidth}P{.14\linewidth}}\toprule
 Attack & Value known & Value unknown & Measured \\\midrule
-Giraud & knows which bit flipped: tests \textbf{1} value of \(e\) & only ``some bit'' (weight 1): tests \textbf{8} values (\hex{01},\ldots,\hex{80}) & \(32\to{\approx}34.6\) \\
-Piret & \multicolumn{2}{P{.58\linewidth}}{already assumes any value --- sweeps \(e\in\{1,\ldots,255\}\) by construction} & unchanged \\\bottomrule
+SM4 Giraud & exact bit: one mask & unknown bit: eight masks & median 32 versus 35 \\
+AES Piret & \multicolumn{2}{P{.54\linewidth}}{The AES differential model can enumerate unknown nonzero byte errors.} & model dependent \\
+SM4 controlled DFA & exact byte mask & not implemented by this known-mask filter & no claim \\\bottomrule
 \end{tabular}
 \end{center}
-\noindent Because Piret already treats the value as unknown, it has no
-known/unknown \emph{value} variant --- only the \emph{position} can be known or not.
+\noindent Distinguish the AES model from the project's SM4 controlled DFA:
+the latter needs the exact error mask. The two plotted SM4 Piret configurations
+change the ordered masks, not whether their values are known. Hiding an arbitrary
+byte error would require a different filter and a new experimental evaluation.
 
 \paragraph{Consequence by timing (wrong round or instruction).}
 If the glitch lands on the wrong round or instruction, the difference propagates
@@ -177,6 +181,35 @@ Wrong round / instr. & no match & no match & retune delay \\\bottomrule
 stays valid. What actually \emph{breaks} an attack is the width leaving the model:
 more than one byte breaks both, while more than one bit breaks only Giraud (Piret
 still holds).
+
+\section{How can one bit actually be changed?}
+In the simulator, $a'=a\xor2^j$ explicitly flips bit $j$. On the STM32F303,
+the host generally cannot command ``flip this internal bit'' through the
+ChipWhisperer-Lite. Its clock and voltage pulse generators perturb physical
+conditions. A selected timing window may produce no change, a reset, an
+instruction fault, or a data error of varying width. Laser and EM injection
+require additional equipment; spatial targeting still does not by itself prove
+that exactly one desired algorithmic bit was flipped.
+
+For a diagnostic firmware build on the laboratory target, compare the same
+intermediate word in correct and faulted executions: $e=A\xor A'$.
+If $e\ne0$ and $e\mathbin{\&}(e-1)=0$, its Hamming weight is one.
+For example $\hex{96FF9D45}\xor\hex{97FF9D45}=\hex{01000000}$.
+Instrumented intermediate states are validation aids and must not be given to
+the ciphertext-only solver. Instrumentation also changes timing, so a result
+must be revalidated for the evaluated firmware build.
+
+Without intermediate-state access, unchanged final SM4 words and a one-byte
+$L^{-1}(\Delta X)$ are useful consistency checks. They do not prove that the
+S-box input error had Hamming weight one. Candidate filtering tests compatibility
+with that assumption; independent encryptions and fresh validation pairs should
+check a recovered key. Knowledge of the exact mask requires evidence beyond
+knowing the pulse parameters.
+
+The hardware capabilities are documented by NewAE in
+\href{https://chipwhisperer.readthedocs.io/en/latest/Capture/ChipWhisperer-Lite.html}{the ChipWhisperer-Lite reference}.
+This establishes available pulse-generation mechanisms, not a guarantee of a
+particular single-bit fault on the STM32F303.
 
 \section{Countermeasures}
 Because the attacks depend on obtaining a clean faulty ciphertext that matches a

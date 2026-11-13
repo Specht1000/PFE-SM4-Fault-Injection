@@ -1,0 +1,529 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{lmodern}
+\usepackage[margin=23mm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,array,longtable,xcolor,hyperref,fvextra,tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\hypersetup{colorlinks=true,linkcolor=teal!60!black,urlcolor=blue!60!black,pdftitle={Understanding every function in piret_sm4.py},pdfauthor={Guilherme Martins Specht}}
+\fvset{fontsize=\small,breaklines=true,breakanywhere=true}
+\newcommand{\hx}[1]{\texttt{#1}}
+\newcommand{\hex}[1]{\texttt{#1}}
+\newcommand{\xor}{\mathbin{\oplus}}
+\newcommand{\rol}{\operatorname{ROL}}
+\newcommand{\note}[1]{\par\medskip\noindent\fcolorbox{teal!60!black}{teal!3}{\parbox{\dimexpr\linewidth-2\fboxsep-2\fboxrule\relax}{#1}}\par\medskip}
+\setlength{\emergencystretch}{3em}
+\setcounter{tocdepth}{1}
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}\centering
+\vspace*{20mm}
+{\Large Polytech Montpellier --- PFE 5A\par}
+\vspace{15mm}
+{\Huge\bfseries Understanding Every Function in\par}
+\vspace{5mm}
+{\LARGE\texttt{piret\_sm4.py}\par}
+\vspace{12mm}
+{\Large A practical, step-by-step reading guide\par}
+\vspace{10mm}
+\begin{tikzpicture}[box/.style={draw,rounded corners,align=center,text width=75mm,minimum height=11mm,fill=teal!4},flow/.style={-{Stealth},thick}]
+\node[box] (a) {Observe correct and faulty ciphertexts};
+\node[box,below=7mm of a] (b) {Undo diffusion and filter key-byte candidates};
+\node[box,below=7mm of b] (c) {Recover four subkeys and reverse the schedule};
+\draw[flow] (a)--(b);\draw[flow] (b)--(c);
+\end{tikzpicture}
+\vfill
+Guilherme Martins Specht\par
+Industrial collaboration: STMicroelectronics\par
+\vspace{8mm}
+Independent guide --- \today\par
+\end{titlepage}
+\pagenumbering{roman}
+\hypersetup{pageanchor=true}
+\tableofcontents\clearpage
+\pagenumbering{arabic}
+
+\section{How to read the complete file}
+This guide covers the imports, all eight top-level functions, the nested fault
+callback, and the terminal entry point. It explains the purpose of each code
+block, important operators and practical values. Repeated iterations are
+summarized rather than printing 256 guesses or an entire matrix elimination.
+The examples are checked by executing the current implementation when this PDF
+is built. The source itself is not modified.
+
+\note{\textbf{Scope.} The name ``Piret SM4'' identifies this project's controlled
+known-byte DFA model. It is not an unchanged transfer of the historical AES
+attack. Exact fault round, byte and XOR magnitude are simulation assumptions.
+No physical STM32 key recovery is established by these Python examples.}
+
+\subsection{The three roles that must remain separate}
+\begin{center}\begin{tabular}{p{.22\linewidth}p{.68\linewidth}}\toprule
+Role & What it knows and does\\\midrule
+Simulated target & Knows plaintext and secret key; produces clean or faulted encryption.\\
+Attacker / solver & Receives ciphertexts and permitted fault descriptors; filters candidates and recovers keys.\\
+Teaching interface & Displays intermediate values to explain the simulation; these values must not become secret inputs to the solver.\\\bottomrule
+\end{tabular}\end{center}
+
+\subsection{Imports and representation}
+\hx{argparse} handles command-line options. \hx{lru\_cache} stores the fixed inverse
+matrix. \hx{struct} packs and unpacks four unsigned 32-bit words.
+\hx{aes} supplies the shared block-length validator; this does not make the attack
+an AES attack. \hx{sm4} supplies the public cipher, S-box, linear maps and constants.
+
+The format \hx{">4I"} means four unsigned 32-bit integers in big-endian order.
+Byte 0 is the most significant byte of a word. Bit index 0 in the binary matrix
+is the least significant bit. The following operators have distinct roles:
+\begin{center}\begin{tabular}{ll}\toprule
+Python & Meaning here\\\midrule
+\hx{a \^{} b} & XOR; addition/subtraction over GF(2)\\
+\hx{a \& b} & Select bits; for sets, intersection\\
+\hx{a | b} & Assemble bits in an integer\\
+\hx{a << n}, \hx{a >> n} & Shift left/right by $n$ bits\\
+\hx{a \% 4} & Wrap an integer index into 0, 1, 2, 3\\
+\hx{items[::-1]} & Reverse a sequence\\\bottomrule
+\end{tabular}\end{center}
+
+\subsection{Running the example}
+\begin{Verbatim}
+python src/piret_sm4.py --step
+python src/debug_piret_sm4.py
+\end{Verbatim}
+The first command presents the attack in the terminal. The second opens the
+source-and-variables debugger with substituted numerical equations.
+
+\section{\texorpdfstring{\texttt{sm4\_fault\_encrypt()}}{sm4_fault_encrypt}: simulate the target}
+\subsection{Inputs and return values}
+\hx{plaintext} and \hx{key} are 16-byte values. \hx{byte} is the affected S-box
+byte, from 0 to 3; \hx{None} requests normal encryption. \hx{mask} is a nonzero
+byte XOR error. \hx{fault\_round} is zero-based: 31 is the last of 32 rounds.
+The return value is \hx{(ciphertext, trace)}. Only the ciphertext is returned
+through the oracle to the recovery engine.
+
+\subsection{Validate the requested fault}
+When a byte is selected, the first condition checks the byte position and mask
+range 1--255. The next condition requires a round in 0--31. Invalid descriptors
+raise \hx{ValueError}; a missing fault byte disables injection.
+
+\subsection{Prepare the teacher's trace}
+\hx{sm4.key\_expansion(key)} creates the target's round keys. The loop builds one
+trace dictionary per round, initially containing its index and round key.
+The \hx{fields} dictionary translates event names into compact teaching labels:
+S-box input $a$, S-box output $b$, linear output and new state word.
+These keys and internal values belong to the target/teacher view, not the solver.
+
+\subsection{Nested \texorpdfstring{\texttt{observer()}}{observer}: the exact fault instruction}
+The cipher calls this callback at internal events. Its condition requires all
+three properties: selected round, event \hx{"Sbox input"}, and a selected byte.
+\begin{Verbatim}
+value ^= mask << (24 - 8 * byte)
+\end{Verbatim}
+For byte 0 and mask 01, the shift is $24-8(0)=24$:
+\[
+\hex{01}\ll24=\texttt{01000000},\qquad
+\texttt{96FF9D45}\xor\texttt{01000000}=\texttt{97FF9D45}.
+\]
+For byte 2 the shift is 8, so the same mask becomes \hx{00000100}.
+The selected byte is corrupted before nonlinear substitution; XOR does not mean
+replacing the entire byte with the mask.
+
+If the event name is in \hx{fields}, the callback saves the value in that round's
+trace. It returns the value, possibly changed. The real \hx{sm4.py} encryption
+uses that returned value, which is what makes the intervention effective.
+The final call passes this observer to \hx{sm4\_encrypt\_block}.
+
+\note{A physical glitch changes operating conditions rather than executing this
+XOR statement. A one-bit mask in Python is exact; a pulse on the board may cause
+no error, multiple errors, an instruction fault or a reset.}
+
+\section{\texorpdfstring{\texttt{inverse\_rows()}}{inverse_rows}: prepare inverse diffusion}
+\subsection{Why this function exists}
+The data linear map is
+\[
+L(x)=x\xor\rol_2(x)\xor\rol_{10}(x)\xor\rol_{18}(x)\xor\rol_{24}(x).
+\]
+It spreads the S-box output difference across a 32-bit word. The solver needs
+the inverse map to restore that difference before guessing a key byte.
+Linearity over GF(2) lets us write $y=Mx$ with a binary $32\times32$ matrix.
+This function calculates $M^{-1}$, not a recovered secret.
+
+\subsection{Cache the fixed matrix}
+\begin{Verbatim}
+@lru_cache(maxsize=1)
+\end{Verbatim}
+Because the matrix does not depend on the key or input, repeated calls reuse its
+cached result. This lasts within the process until the cache is cleared or the
+process ends; the comment ``first call, ever'' should be read with that limit.
+
+\subsection{Step 1: discover each column}
+\begin{Verbatim}
+basis_word = 1 << bit_index
+transformed_word = sm4.linear(basis_word)
+columns.append(transformed_word)
+\end{Verbatim}
+The loop visits 32 unit vectors: \hx{00000001}, \hx{00000002}, \hx{00000004},
+and so on. Applying $L$ to unit vector $i$ gives column $i$ of $M$.
+For the first column:
+\[
+L(\texttt{00000001})=
+\texttt{00000001}\xor\texttt{00000004}\xor\texttt{00000400}
+\xor\texttt{00040000}\xor\texttt{01000000}=\texttt{01040405}.
+\]
+This column says which output bits depend on input bit 0.
+
+\subsection{Step 2: collect rows and attach the identity}
+\input{row_building_steps.tex}
+
+\subsection{Step 3: pivots and XOR elimination}
+For each column, \hx{pivot = None} means that no suitable row has been found yet.
+The search examines rows from the diagonal downward and stops at the first 1.
+No pivot means a singular matrix; the current implementation raises
+\hx{StopIteration}. Correct SM4 $L$ is invertible, so this is not a normal result.
+
+The tuple assignment swaps the pivot into its diagonal position. The second
+loop clears that column in every other row:
+\begin{Verbatim}
+rows[column], rows[pivot] = rows[pivot], rows[column]
+rows[row] ^= rows[column]
+\end{Verbatim}
+Why XOR? Because $1\xor1=0$, exactly the cancellation required over GF(2).
+The pivot is already 1, so division is unnecessary.
+
+Here is the same method on a small $3\times3$ example, with conventional matrix
+column order. This matrix is only an illustration, not a reduced SM4 cipher:
+\[
+\left[\begin{array}{ccc|ccc}
+1&1&0&1&0&0\\0&1&1&0&1&0\\1&0&0&0&0&1
+\end{array}\right]
+\xrightarrow{R_2\gets R_2\xor R_0}
+\left[\begin{array}{ccc|ccc}
+1&1&0&1&0&0\\0&1&1&0&1&0\\0&1&0&1&0&1
+\end{array}\right].
+\]
+Use row 1 to clear column 1 in rows 0 and 2:
+\[
+\left[\begin{array}{ccc|ccc}
+1&0&1&1&1&0\\0&1&1&0&1&0\\0&0&1&1&1&1
+\end{array}\right].
+\]
+Use row 2 to clear column 2 in rows 0 and 1:
+\[
+\left[\begin{array}{ccc|ccc}
+1&0&0&0&0&1\\0&1&0&1&0&1\\0&0&1&1&1&1
+\end{array}\right]=[I\mid M^{-1}].
+\]
+For instance, this inverse maps $(1,1,1)^T$ to $(1,0,1)^T$.
+The real code performs the same operations for 32 columns.
+
+\subsection{Step 4: extract the inverse rows}
+\begin{Verbatim}
+inverse_row = augmented_row >> 32
+inverse_matrix_rows.append(inverse_row)
+return tuple(inverse_matrix_rows)
+\end{Verbatim}
+The lower half is now the identity. Shifting by 32 discards it and keeps the
+inverse row from the upper half. The tuple contains 32 integers, each encoding
+one row of $M^{-1}$.
+
+\section{\texorpdfstring{\texttt{inverse\_linear(value)}}{inverse_linear}: apply the inverse}
+\subsection{The distinction from \texttt{inverse\_rows}}
+\hx{inverse\_rows()} prepares the transformation. \hx{inverse\_linear(value)}
+applies it to one observed 32-bit difference. The latter calls the former to
+obtain its cached matrix, so callers do not need to prepare it manually.
+
+\subsection{Follow one output bit}
+\begin{Verbatim}
+selected_bits = row & value
+set_bit_count = bin(selected_bits).count("1")
+parity = set_bit_count & 1
+result |= parity << index
+\end{Verbatim}
+AND selects the participating input bits. Counting ones and keeping the low
+count bit computes their parity: odd count gives 1, even count gives 0.
+That is the GF(2) dot product of a matrix row and the input vector.
+For \hx{value = 734E3D3D}, inverse row 0 gives
+\[
+\texttt{51154505}\mathbin{\&}\texttt{734E3D3D}=\texttt{51040505}.
+\]
+Eight selected bits are 1, so output bit 0 is $8\bmod2=0$.
+Each of the 32 rows calculates one output bit. Shifting the parity positions
+that bit, and OR assembles distinct positions without disturbing previous bits.
+The complete result is
+\[
+\texttt{inverse\_linear(0x734E3D3D)}=\texttt{0x4F000000}.
+\]
+Applying forward $L$ returns \hx{734E3D3D}, which checks the inversion.
+
+\input{matrix_visual_walkthrough.tex}
+\section{\texorpdfstring{\texttt{sm4\_byte\_candidates()}}{sm4_byte_candidates}: solve one observation}
+\subsection{What the function receives}
+Inputs are clean ciphertext, faulty ciphertext, selected byte and known mask.
+Neither the target key nor its internal trace is an argument. After validating
+lengths and ranges, \hx{struct.unpack(">4I", ...)} splits each output into words.
+SM4 ciphertext order is $(X_{35},X_{34},X_{33},X_{32})$.
+
+\subsection{Check the fault shape and undo L}
+The check \hx{c[1:] != f[1:]} rejects changes in the other three words: the
+isolated last-round model requires them unchanged. The function then computes
+\[
+\Delta X=c[0]\xor f[0],\qquad \Delta B=L^{-1}(\Delta X).
+\]
+For the first public-vector observation:
+\[
+\texttt{681EDF34}\xor\texttt{1B50E209}=\texttt{734E3D3D},
+\qquad \Delta B=\texttt{4F000000}.
+\]
+These shape checks are model-consistency checks, not proof of a physical
+single-bit error at the intended instruction.
+
+\subsection{Select the byte and observable constant}
+\begin{Verbatim}
+shift = 24 - 8 * byte
+d = (delta_b >> shift) & 255
+known = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+\end{Verbatim}
+For byte 0, \hx{shift = 24}, so $d=\hex{4F}$. The preceding condition rejects
+zero differences and any bits outside the selected byte. In
+\hx{delta\_b \& \~{}(255 << shift)}, complement creates a mask for all other
+positions; AND detects unwanted differences there. Python's unbounded signed
+complement is harmless for this test with a nonnegative 32-bit difference.
+
+The known data-word XOR is
+\[
+\texttt{D206965E}\xor\texttt{86B3E94F}\xor\texttt{536E4246}
+=\texttt{07DB3D57},
+\]
+so the first byte's observable constant is $q=\hex{07}$, stored as \hx{known}.
+This XOR is the combination of the three newest input words, not the older
+word canceled when forming the ciphertext difference.
+
+\subsection{Try inputs, then convert them into key bytes}
+\begin{Verbatim}
+faulty_input = candidate_input ^ mask
+output_difference = sm4.SBOX[candidate_input] ^ sm4.SBOX[faulty_input]
+\end{Verbatim}
+The loop visits 0--255 and keeps inputs satisfying
+$S(a)\xor S(a\xor e)=d$. With $e=\hex{01}$ and $d=\hex{4F}$, the input guesses
+are \hx{96} and \hx{97}:
+\[
+S(\hex{96})\xor S(\hex{97})=\hex{1A}\xor\hex{55}=\hex{4F}.
+\]
+Because $a=q\xor k$, the next loop computes \hx{key\_byte = candidate\_input \^{} known}:
+\[
+\hex{96}\xor\hex{07}=\hex{91},\qquad
+\hex{97}\xor\hex{07}=\hex{90}.
+\]
+The return tuple contains key candidates, input candidates, and the full
+\hx{delta\_b} word. One observation leaves ambiguity; this function does not
+select the reference key from that ambiguity.
+
+\section{\texorpdfstring{\texttt{reverse\_sm4()}}{reverse_sm4}: recover the master key}
+\subsection{Why the input contains four subkeys}
+The function requires four consecutive final subkeys in ascending order:
+$rk_{28},rk_{29},rk_{30},rk_{31}$. They correspond to schedule words
+$K_{32},K_{33},K_{34},K_{35}$.
+\begin{Verbatim}
+words = [None] * 32 + list(final_keys)
+\end{Verbatim}
+This creates 36 slots: 32 unknown words followed by four known seed words.
+One 32-bit final subkey is insufficient for this direct recurrence inversion.
+
+\subsection{Reverse one recurrence, then repeat}
+\begin{Verbatim}
+value = words[index+1] ^ words[index+2] ^ words[index+3] ^ sm4.CK[index]
+words[index] = words[index+4] ^ sm4.linear_key(sm4.sbox(value))
+\end{Verbatim}
+The loop \hx{range(31, -1, -1)} visits 31 down to 0. At each step the four
+words to the right are already known. It implements
+\[
+K_i=K_{i+4}\xor T'(K_{i+1}\xor K_{i+2}\xor K_{i+3}\xor CK_i).
+\]
+Here $T'=L'\circ\tau$, where $L'(z)=z\xor\rol_{13}(z)\xor\rol_{23}(z)$.
+This is different from data diffusion $L$. The constants $CK_i$ are public:
+byte $j$ is $7(4i+j)\bmod256$, with bytes concatenated big-endian.
+\input{generated/reverse_example.tex}
+The optional observer receives the newly calculated index and word for teaching.
+It is not required to calculate the key.
+
+\subsection{Remove FK and serialize}
+\begin{Verbatim}
+master_word = words[word_index] ^ sm4.FK[word_index]
+return struct.pack(">4I", *master_words)
+\end{Verbatim}
+The initial words were whitened by fixed public constants, so XOR removes them.
+The four results are serialized into the 16-byte master key. For word 0:
+$\hex{A292FFA1}\xor\hex{A3B1BAC6}=\hex{01234567}$.
+The star expands the four-word list into four arguments to \hx{struct.pack}.
+
+\section{\texorpdfstring{\texttt{peel\_sm4()}}{peel_sm4}: expose an earlier round}
+\subsection{Restore chronological order}
+This function receives a ciphertext, a target round in 28--31 and a dictionary
+containing only already recovered keys. It validates the block, unpacks its
+four words and reverses their order:
+\begin{Verbatim}
+words = list(struct.unpack(">4I", ciphertext))[::-1]
+\end{Verbatim}
+Ciphertext order is reversed relative to the rolling cipher state. For the
+public vector the chronological window is
+\[
+[\hex{536E4246},\hex{86B3E94F},\hex{D206965E},\hex{681EDF34}].
+\]
+
+\subsection{Undo only rounds with recovered keys}
+For target round 31, \hx{range(31, 31, -1)} is empty: no round is peeled.
+For target round 30, only round 31 is undone. If its key is missing,
+the function raises \hx{ValueError} instead of guessing a key.
+\begin{Verbatim}
+previous = words[3] ^ sm4.linear(sm4.sbox(words[0] ^ words[1] ^ words[2] ^ recovered_keys[number]))
+words = [previous, words[0], words[1], words[2]]
+\end{Verbatim}
+This solves the forward recurrence for the state word that was dropped.
+Using recovered $rk_{31}=\hex{9124A012}$:
+\[
+A=\hex{536E4246}\xor\hex{86B3E94F}\xor\hex{D206965E}
+\xor\hex{9124A012}=\hex{96FF9D45},
+\]
+\[
+\tau(A)=\hex{1A488C73},\quad L(\tau(A))=\hex{138D5078},\quad
+X_{31}=\hex{681EDF34}\xor\hex{138D5078}=\hex{7B938F4C}.
+\]
+The new chronological window is
+\[
+[\hex{7B938F4C},\hex{536E4246},\hex{86B3E94F},\hex{D206965E}].
+\]
+Finally the function reverses and packs it again, preserving the ciphertext-like
+interface expected by the byte filter. The same peeling is applied separately
+to correct and faulty outputs; teacher trace values are not used.
+
+\section{\texorpdfstring{\texttt{recover\_sm4\_master\_key()}}{recover_sm4_master_key}: coordinate the attack}
+\subsection{Inputs and validation}
+\hx{correct} is the clean ciphertext. \hx{fault\_oracle(round, byte, mask)} asks
+the target for a faulty ciphertext. \hx{masks} is converted to a tuple, then
+checked for a nonempty sequence, distinct elements and values 1--255.
+\hx{start\_byte} must be 0--3. Repeating the same mask on the same deterministic
+input does not supply a new constraint, which motivates the duplicate check.
+
+\hx{candidate\_filter=None} selects the known-mask filter described above.
+A supplied filter can replace that equation, as in the Giraud-inspired adapter.
+Its affected byte must match the requested byte. An optional \hx{observer}
+receives copies of event dictionaries for presentation.
+
+\subsection{Initialize state and choose byte order}
+\hx{keys} stores uniquely recovered round keys; \hx{history} stores observation
+records; \hx{counts} stores the latest surviving-candidate count for each byte;
+\hx{used} counts faulty outputs.
+The outer loop visits rounds 31, 30, 29 and 28. Each begins with a clean view
+obtained by peeling only later rounds whose subkeys are in \hx{keys}.
+\hx{bytearray(4)} allocates the four bytes of the current subkey.
+\begin{Verbatim}
+for offset in range(4):
+    byte_order.append((start_byte + offset) % 4)
+\end{Verbatim}
+For \hx{start\_byte=2}, this gives
+$(2+0)\bmod4=2$, $(2+1)\bmod4=3$, $(2+2)\bmod4=0$,
+$(2+3)\bmod4=1$: order $[2,3,0,1]$.
+This changes the visiting order, not byte positions in the assembled key.
+
+\subsection{Ask for faults and intersect candidates}
+For each byte, \hx{survivors=None} means no observation yet; it is not an empty
+candidate set. \hx{enumerate(masks, 1)} provides observation numbers starting at 1
+and their masks. The oracle returns a faulty ciphertext, it is peeled, and
+the byte filter computes a fresh candidate set.
+\begin{Verbatim}
+if survivors is None:
+    before = 256
+    survivors = set(fresh)
+else:
+    before = len(survivors)
+    survivors = survivors & fresh
+\end{Verbatim}
+With the first-byte example:
+\[
+\{\hex{90},\hex{91}\}\cap
+\{\hex{70},\hex{72},\hex{93},\hex{91}\}=\{\hex{91}\}.
+\]
+The second set comes from mask 02 and difference 81. Intersection can remove
+candidates but never introduce new ones. An empty intersection raises an error
+because the observations are incompatible with the model.
+
+\subsection{Record evidence; accept only uniqueness}
+After each valid observation, \hx{used} increases and \hx{counts} is updated.
+The event dictionary records round, byte, mask, counts, surviving values,
+S-box inputs, inverse difference, ciphertexts, peeled views and the keys used
+for peeling. It supports debugging and teaching; it is not an additional source
+of secret key information.
+
+\begin{Verbatim}
+if len(survivors) == 1:
+    subkey[byte] = next(iter(survivors))
+    break
+\end{Verbatim}
+The set has exactly one element, so extracting that element is unambiguous.
+\hx{break} stops requesting faults for this byte. It does not exit the round loop.
+The \hx{else} attached to the observation \hx{for} executes only if its mask
+budget is exhausted without that break. The function then returns
+\hx{complete=False}, \hx{master\_key=None} and the blocked round; it never
+pretends a guessed byte is recovered.
+
+\subsection{Assemble subkeys, then reverse the schedule}
+\begin{Verbatim}
+keys[number] = int.from_bytes(subkey, "big")
+\end{Verbatim}
+For bytes \hx{91 24 A0 12}, this yields integer \hx{9124A012}.
+Only after all four bytes are unique is the subkey available for peeling.
+The final loop builds \hx{final\_keys} in ascending order 28--31, even though
+the attack recovered them in descending order. It then calls
+\hx{reverse\_sm4(final\_keys)} and returns the master key, four subkeys,
+history, counts, query cost and \hx{complete=True}.
+\input{generated/recovery_example.tex}
+
+\section{\texorpdfstring{\texttt{main()}}{main}: connect the terminal interface}
+\hx{ArgumentParser} reads command-line settings. The algorithm option is fixed
+to SM4. \hx{--step} enables terminal lesson pauses; \hx{--color} controls ANSI
+color; \hx{--faults} limits observations per byte; \hx{--row} chooses the first
+byte to demonstrate. Its name is retained for interface compatibility, not
+because SM4 uses an AES-style matrix.
+
+\hx{--column} and \hx{--seed} are accepted for compatibility but are not forwarded
+to \hx{run.sm4\_demo} by this entry point. They do not change this deterministic
+SM4 scenario. The explicit fault-limit check rejects values outside 1--255.
+
+The local \hx{import run} defers loading presentation until terminal execution
+is requested. The call
+\begin{Verbatim}
+run.sm4_demo(run.LessonTerminal(args.color, args.step), args.faults, args.row)
+\end{Verbatim}
+connects settings to the existing shared lesson. Successful recovery returns
+exit code 0; incomplete recovery returns 2.
+
+\subsection{The final entry-point guard and logs}
+\begin{Verbatim}
+if __name__ == "__main__":
+    from terminal_log import run_with_log
+    raise SystemExit(run_with_log(main, "piret_sm4"))
+\end{Verbatim}
+This block runs when the file is executed directly. Importing the functions
+does not launch a lesson. The wrapper captures terminal execution in
+\hx{logs/piret\_sm4.txt} and colored HTML; files are overwritten per run.
+\hx{SystemExit} passes the resulting status to the shell.
+
+\input{execution_flow.tex}
+\section{One complete practical story}
+The target encrypts a public plaintext with its hidden key. The solver gets a
+clean ciphertext. It requests two useful fault observations for the first byte,
+undoes $L$, intersects candidates and obtains 91. It repeats for the remaining
+three bytes to obtain $rk_{31}$. Only then can it peel round 31 and attack round
+30. The process continues through round 28. Four consecutive recovered subkeys
+seed reverse expansion, whose initial FK whitening is undone to obtain the
+master key. Re-encryption and decryption verify the result.
+
+The source's known-mask solver and the physical injection mechanism are separate
+questions. A valid laboratory evaluation must establish whether real faults
+match the assumed round, location and magnitude; the exact XOR in the Python
+callback is a controlled teaching model.
+
+\subsection{Build this document}
+\begin{Verbatim}
+python build_piret_sm4_guide.py
+\end{Verbatim}
+\input{generated/source_info.tex}
+\end{document}

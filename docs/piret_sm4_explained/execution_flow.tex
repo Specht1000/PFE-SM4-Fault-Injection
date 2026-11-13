@@ -1,0 +1,192 @@
+\clearpage
+\section{Follow one real execution from the command to the recovered key}
+This section is an execution route, not another independent description of the
+functions. Read the numbered stages in order: the output of one call becomes
+an input to the next. Numerical records are generated from the current solver.
+The builder also runs the real terminal entry point without interactive pauses
+and verifies that it succeeds. The command below adds pauses but follows the
+same mathematical path:
+\begin{Verbatim}
+python src/piret_sm4.py --faults 8 --row 0 --step
+\end{Verbatim}
+
+\subsection{The route through the files}
+\begin{center}
+\begin{tikzpicture}[node distance=5mm,box/.style={draw,rounded corners,fill=teal!5,text width=125mm,align=center,minimum height=11mm,font=\small},flow/.style={-{Stealth},thick}]
+\node[box] (a) {\hx{piret\_sm4.py}: entry guard $\to$ logger $\to$ \hx{main()}};
+\node[box,below=of a] (b) {\hx{run.py}: \hx{sm4\_demo(terminal, limit=8, start\_byte=0)}};
+\node[box,below=of b] (c) {Target: \hx{sm4\_fault\_encrypt(P, K, byte=None)} $\to$ clean ciphertext};
+\node[box,below=of c] (d) {Solver: \hx{recover\_sm4\_master\_key(C, oracle, masks=1..8)}};
+\node[box,below=of d] (e) {Per observation: peel $\to$ oracle/target $\to$ peel $\to$ byte filter $\to$ intersection};
+\node[box,below=of e] (f) {After four subkeys: \hx{reverse\_sm4()} $\to$ master key $\to$ verification};
+\draw[flow] (a)--(b);\draw[flow] (b)--(c);\draw[flow] (c)--(d);
+\draw[flow] (d)--(e);\draw[flow] (e)--(f);
+\end{tikzpicture}
+\end{center}
+The target knows the secret key. The solver receives ciphertexts and fault
+descriptors. The terminal's teaching callbacks display additional internals;
+their displays are not secret inputs to the candidate equations.
+
+\subsection{Stage 1: argument parsing and the clean target call}
+The entry guard calls \hx{run\_with\_log(main, "piret\_sm4")}. The parser obtains
+\hx{faults=8}, \hx{row=0}, \hx{step=True}, with automatic color mode.
+\hx{main()} constructs \hx{LessonTerminal} and invokes \hx{run.sm4\_demo}.
+That function converts \hx{sm4.KEY} and \hx{sm4.PLAINTEXT} from hexadecimal
+strings to bytes. For this public demonstration vector:
+\[
+P=K=\hx{0123456789ABCDEFFEDCBA9876543210}.
+\]
+The clean call uses \hx{byte=None}; the observer records events without
+injecting any fault. The result is
+\[
+C=\hx{681EDF34D206965E86B3E94F536E4246}.
+\]
+The teacher can display the clean round-31 trace
+$A=\hx{96FF9D45}$, $B=\hx{1A488C73}$, $L(B)=\hx{138D5078}$.
+These values explain the target; the solver does not receive this trace.
+
+\subsection{Stage 2: enter the solver and select the first byte}
+The actual call passes \hx{range(1, 9)} as permitted masks and the two
+callbacks \hx{oracle} and \hx{report}. Solver state starts as
+\begin{Verbatim}
+keys = {}
+history = []
+counts = {}
+used = 0
+\end{Verbatim}
+The outer round loop selects \hx{number=31}. The call
+\hx{peel\_sm4(C, 31, \{\})} undoes no rounds and returns $C$ unchanged.
+The subkey buffer is \hx{00 00 00 00}; \hx{start\_byte=0} produces visiting
+order $[0,1,2,3]$. The first selected byte is 0, \hx{survivors=None}, and
+\hx{enumerate(masks, 1)} produces observation 1, mask 01.
+
+\subsection{Stage 3: the oracle enters the target, then returns only ciphertext}
+\begin{center}
+\begin{tikzpicture}[x=1mm,y=1mm,every node/.style={font=\small}]
+\node[draw,fill=teal!8,minimum width=38mm,minimum height=11mm] (s) at (0,0) {solver};
+\node[draw,fill=blue!8,minimum width=58mm,minimum height=11mm] (t) at (98,0) {oracle $\to$ target};
+\draw[-{Stealth},thick] (s.north east) to[bend left=18] node[above] {round 31, byte 0, mask 01} (t.north west);
+\draw[-{Stealth},thick] (t.south west) to[bend left=18] node[below] {faulty ciphertext only} (s.south east);
+\end{tikzpicture}
+\end{center}
+\hx{oracle(31, 0, 1)} calls
+\hx{sm4\_fault\_encrypt(P, K, byte=0, mask=1, fault\_round=31)}.
+The callback intervenes only at the selected S-box input:
+\[
+\begin{aligned}
+\text{shift}&=24-8(0)=24,\\
+\text{shifted mask}&=\hx{01}\ll24=\hx{01000000},\\
+A'&=\hx{96FF9D45}\xor\hx{01000000}=\hx{97FF9D45}.
+\end{aligned}
+\]
+After the target completes normal SM4 processing, the oracle returns
+\[
+F_1=\hx{1B50E209D206965E86B3E94F536E4246}.
+\]
+The terminal may illustrate fault propagation using its teacher trace.
+The solver gets $F_1$ alone. It calls \hx{peel\_sm4(F1,31,keys)}, which also
+undoes no rounds.
+
+\subsection{Stage 4: follow the first byte-filter call}
+\hx{sm4\_byte\_candidates(C,F1,byte=0,mask=1)} unpacks four big-endian words
+and checks that the last three words match. It computes
+\[
+\Delta X=\hx{681EDF34}\xor\hx{1B50E209}=\hx{734E3D3D}.
+\]
+Its call to \hx{inverse\_linear(0x734E3D3D)} obtains the fixed inverse rows.
+On a fresh process, \hx{inverse\_rows()} builds and caches them; subsequent
+observations reuse the matrix. The earlier illustrated matrix sections explain
+that preparation. Applying its rows gives
+\[
+\Delta B=\hx{4F000000},\qquad
+d=(\hx{4F000000}\gg24)\mathbin{\&}\hx{FF}=\hx{4F}.
+\]
+The other three words yield the public constant
+\[
+q_{\rm word}=\hx{D206965E}\xor\hx{86B3E94F}\xor\hx{536E4246}
+=\hx{07DB3D57},\qquad q=\hx{07}.
+\]
+The 256-input loop retains only $a=\hx{96}$ and $a=\hx{97}$ because
+$S(a)\xor S(a\xor\hx{01})=\hx{4F}$.
+Converting input guesses to key guesses gives
+$\hx{96}\xor\hx{07}=\hx{91}$ and
+$\hx{97}\xor\hx{07}=\hx{90}$.
+The function returns
+\begin{Verbatim}
+fresh  = {0x90, 0x91}
+inputs = {0x96, 0x97}
+delta  = 0x4F000000
+\end{Verbatim}
+Back in the solver, \hx{survivors=None} selects the first-observation branch:
+\hx{before=256} and \hx{survivors=set(fresh)}.
+\hx{used} becomes 1 and \hx{counts["31:0"]} becomes 2. An event is appended
+and passed to \hx{report(event)} for display. Since two candidates remain,
+the solver does not write a subkey byte yet.
+
+\subsection{Stage 5: the second observation resolves the first byte}
+The next observation requests \hx{oracle(31,0,2)}. It returns
+\[
+F_2=\hx{ED9DD932D206965E86B3E94F536E4246}.
+\]
+The same filter computes
+\[
+\begin{aligned}
+\Delta X&=\hx{681EDF34}\xor\hx{ED9DD932}=\hx{85830606},\\
+\Delta B&=L^{-1}(\hx{85830606})=\hx{81000000},\qquad d=\hx{81}.
+\end{aligned}
+\]
+Its compatible S-box inputs are $\{\hx{75},\hx{77},\hx{94},\hx{96}\}$,
+giving fresh key guesses $\{\hx{70},\hx{72},\hx{93},\hx{91}\}$.
+The existing survivor set is now intersected:
+\[
+\{\hx{90},\hx{91}\}\cap\{\hx{70},\hx{72},\hx{93},\hx{91}\}
+=\{\hx{91}\}.
+\]
+Now \hx{used=2}, \hx{counts["31:0"]=1} and \hx{subkey[0]=0x91}.
+The buffer becomes \hx{91 00 00 00}; the other positions are not recovered yet.
+The \hx{break} exits the mask loop, so mask 03 is not requested for this byte.
+
+\subsection{Stages 6--9: follow all observations and assemble each subkey}
+The next tables are generated from the real event history, in execution order.
+They connect loop variables, inverse differences, candidate intersections,
+byte-buffer updates and subkey milestones. All hexadecimal entries denote
+values, not variable names. Query numbering excludes the clean reference.
+\input{generated/execution_observations.tex}
+
+\subsection{Stage 10: four recovered words enter reverse expansion}
+The attack's recovery order was 31, 30, 29, 28. The final list is deliberately
+assembled in the ascending order expected by \hx{reverse\_sm4}:
+\begin{Verbatim}
+final_keys = [0x428D3654, 0x62293496, 0x01CF72E5, 0x9124A012]
+\end{Verbatim}
+These are $K_{32},K_{33},K_{34},K_{35}$. The first backward calculation is
+\[
+\begin{aligned}
+Q&=\hx{428D3654}\xor\hx{62293496}\xor\hx{01CF72E5}\xor\hx{646B7279}
+=\hx{4500025E},\\
+\tau(Q)&=\hx{73D6E99D},\qquad T'(Q)=\hx{605CAC93},\\
+K_{31}&=\hx{9124A012}\xor\hx{605CAC93}=\hx{F1780C81}.
+\end{aligned}
+\]
+Each following index reuses words already calculated to its right. No new
+oracle requests occur in this phase. At the end, remove the four FK words:
+\input{generated/execution_fk.tex}
+
+\subsection{Stage 11: return values, verification and process exit}
+The solver returns \hx{complete=True}, the recovered master key, four subkeys,
+32 events, candidate counts and \hx{used=32}. The terminal's schedule display
+must agree with that key. The verified round trip is
+\[
+\begin{aligned}
+\operatorname{Encrypt}(P,MK)&=\hx{681EDF34D206965E86B3E94F536E4246}=C,\\
+\operatorname{Decrypt}(C,MK)&=\hx{0123456789ABCDEFFEDCBA9876543210}=P.
+\end{aligned}
+\]
+The simulation also compares the recovered key with the target's reference
+key, only for validation. \hx{sm4\_demo} returns \hx{True}; \hx{main} returns
+0; the logging wrapper finishes and \hx{SystemExit} passes status 0 to the shell.
+\note{The 32 faulty ciphertexts are this software example's recovery cost.
+Teacher callbacks may recompute values for display; those calculations are not
+additional independent observations. Physical glitch calibration and failed
+acquisitions are not counted or demonstrated here.}
+\clearpage

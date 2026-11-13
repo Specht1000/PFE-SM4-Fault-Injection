@@ -44,6 +44,24 @@ The code, comments and interface are written in English.
 
 ## Run
 
+An independent English PDF explains every function in `src/piret_sm4.py` with
+short practical examples: [Piret SM4 explained](docs/Piret_SM4_Explained.pdf).
+Rebuild it with `python build_piret_sm4_guide.py`; its LaTeX source is in
+`docs/piret_sm4_explained/`.
+
+For SM4 Piret debugging with the source view, variables and numerical equations:
+
+```powershell
+python src/debug_piret_sm4.py
+```
+
+The original debugger GUI includes a calculation panel with substituted values
+for the next line and results from the previous line. Its Step, Finish function,
+Auto, Run to end and Restart controls are preserved. `python src/debug_sm4.py`
+opens the same interface.
+See [the debugging guide](docs/DEBUG_SM4_PIRET.md) for shortcuts and live-debugger
+instructions. TXT/HTML execution logs are overwritten per run.
+
 Requires **Python 3.9 or newer**. The GUI also requires **Tkinter**, normally
 included with the standard Python installer on Windows. The demonstrations use
 the Python standard library; no board connection or external Python packages

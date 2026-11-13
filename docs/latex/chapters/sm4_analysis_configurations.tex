@@ -1,0 +1,44 @@
+\section{Why the analyses contain four SM4 configurations}
+\label{sec:four_sm4_configurations}
+The four plotted names describe experimental configurations, not four independently published attacks. The SM4 ``Piret'' label denotes this project's controlled known-mask DFA. The SM4 ``Giraud'' label denotes its single-bit-inspired filter. Neither name claims an unchanged transfer of an AES attack to SM4. In particular, the known XOR magnitude required by the SM4 example must not be attributed to every classical Piret--Quisquater fault model.
+
+\begin{center}\small
+\begin{tabular}{P{.23\linewidth}P{.31\linewidth}P{.34\linewidth}}\toprule
+Plot label & Ordered masks used by the target & Information given to the solver\\\midrule
+Piret: byte masks & 01, 02, 03, 04, 05, 06, 07, 08 & Exact mask for every observation; masks may contain several set bits.\\
+Piret: matched bits & 01, 02, 04, 08, 10, 20, 40, 80 & Exact mask; the target uses only single-bit faults to match Giraud's sequence.\\
+Giraud: known bit & 01, 02, 04, 08, 10, 20, 40, 80 & The exact flipped bit; a stronger-knowledge control experiment.\\
+Giraud: unknown bit & Same single-bit sequence & Only the one-bit property. The simulator's actual mask is hidden from the candidate filter.\\\bottomrule
+\end{tabular}\end{center}
+
+\paragraph{Why two Piret configurations?}
+The default byte-mask sequence includes multi-bit errors such as $\hex{03}=00000011_2$. The matched-bit configuration changes only the selected masks. It lets us compare candidate filters under identical observations rather than changing both the fault sequence and attacker knowledge simultaneously. A byte fault means corruption confined to a byte; it does not require all eight bits to change.
+
+\paragraph{Why two Giraud configurations?}
+The unknown-bit configuration preserves uncertainty about which bit flipped. The known-bit configuration supplies that information deliberately, to measure how much the uncertainty costs. Physical control of glitch timing does not automatically justify known-bit mode.
+
+\subsection{The exact mathematical distinction}
+Let $d$ be the observed S-box output difference after inverse diffusion and let $q$ be the observable XOR of the other three state-word bytes. For known mask $e$, the input and key candidate sets are
+\[
+\mathcal A_e(d)=\{a:S(a)\xor S(a\xor e)=d\},\qquad
+\mathcal K_e(d,q)=\{a\xor q:a\in\mathcal A_e(d)\}.
+\]
+For an unknown flipped bit, define $\mathcal E=\{01,02,04,08,10,20,40,80\}_{16}$. The filter uses
+\[
+\mathcal K_{\rm unknown}(d,q)=\bigcup_{e\in\mathcal E}\mathcal K_e(d,q).
+\]
+The union is computed separately for each observation; it does not assume that the same unknown bit flipped in every encryption. Across observations the candidate sets are intersected. Since the actual single-bit mask is one member of $\mathcal E$, its known-mask candidate set is contained in the unknown-bit set for that observation.
+
+For the first worked observation, $d=\hex{4F}$ and $q=\hex{07}$. Knowing $e=\hex{01}$ leaves key candidates $\{\hex{90},\hex{91}\}$. Hiding the bit leaves
+\[
+\{\hex{19},\hex{1B},\hex{6A},\hex{89},\hex{90},\hex{91},\hex{A0},\hex{B0},\hex{C9},\hex{EA}\}.
+\]
+Thus the two filters do not extract the same information from that pair.
+
+\paragraph{Why some plotted results coincide.}
+Piret with matched bits and Giraud with known bit test the same equation with the same observations. Their full candidate histories were checked for equality in all 100 paired trials. Separate graph panels expose these equal results. Equality here is a control result, not evidence that the historical AES attacks are identical.
+
+\subsection{What the 100-trial comparison actually establishes}
+All four configurations recovered and verified the full key in 100 seeded software trials. The three known-mask configurations consumed 32 faulty outputs each. Unknown-bit Giraud consumed a mean of 35.06, a median of 35 and a range of 32--40. These are dataset results, not universal fault requirements. Offline timing differences between equivalent filters describe implementation overhead.
+
+With a maximum of two observations per target byte, unknown-bit Giraud reached $rk_{31}$ in 40\% of trials, $rk_{30}$ in 15\%, $rk_{29}$ in 7\%, and $rk_{28}$ and the master key in 3\%. The known-mask configurations completed all stages in these trials. Recovering the last subkey alone therefore must not be reported as full master-key recovery. Once all four consecutive tail words are unique, schedule inversion needs no further faulty ciphertexts.
