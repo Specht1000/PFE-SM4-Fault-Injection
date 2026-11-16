@@ -1,4 +1,6 @@
 __pycache__/
+# Microsoft Office temporary lock files (for example, ~$Presentation.pptx).
+~$*
 .venv/
 .vscode/
 /logs/

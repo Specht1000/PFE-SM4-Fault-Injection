@@ -140,6 +140,29 @@ def inverse_rows():
     return tuple(inverse_matrix_rows)
 
 
+# Optional replacement for the matrix-based inverse_linear() below.
+# To use this version, replace the active function with this uncommented block.
+# Keep only ONE active definition named inverse_linear.
+#
+# For SM4's data map L, four applications satisfy L^4(x) = ROL_8(x).
+# If value = L(x), three more applications produce ROL_8(x).
+# Rotate right by 8 (equivalently left by 24) to recover x.
+# This identity is specific to SM4's L, not the key-schedule map L-prime.
+#
+# def inverse_linear(value):
+#     # Apply the public data transformation three times.
+#     result = sm4.linear(value)
+#     result = sm4.linear(result)
+#     result = sm4.linear(result)
+#
+#     # Undo the remaining eight-bit left rotation.
+#     result = sm4.rotl(result, 24)
+#
+#     return result
+#
+# Example: 734E3D3D -> 4F04BF00 -> 9DA47A90 -> 0000004F -> 4F000000.
+
+
 def inverse_linear(value):
     """Apply L^-1 to a 32-bit word: result = (inverse matrix) * value over GF(2).
 

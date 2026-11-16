@@ -114,7 +114,7 @@ def scenario_one_byte():
     keys = {}
     clean_view = P.peel_sm4(correct, 31, keys)
     survivors = None
-    for mask in (1, 2, 3, 4):
+    for mask in (3, 1, 2, 4):
         faulty, _ = P.sm4_fault_encrypt(PLAINTEXT, KEY, 0, mask, 31)
         faulty_view = P.peel_sm4(faulty, 31, keys)
         fresh, _inputs, _delta = P.sm4_byte_candidates(clean_view, faulty_view, 0, mask)
@@ -132,7 +132,7 @@ def scenario_full():
     def oracle(number, byte, mask):
         return P.sm4_fault_encrypt(PLAINTEXT, KEY, byte, mask, number)[0]
 
-    result = P.recover_sm4_master_key(correct, oracle, tuple(range(1, 9)))
+    result = P.recover_sm4_master_key(correct, oracle, (3, 1, 2, 4, 5, 6, 7, 8))
     if result["complete"] and result["master_key"] == KEY:
         return "master key recovered = " + result["master_key"].hex()
     return "recovery incomplete"

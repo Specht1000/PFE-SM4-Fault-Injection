@@ -1,0 +1,4 @@
+https://datatracker.ietf.org/doc/html/draft-crypto-sm4-00#section-6.3
+https://ieeexplore.ieee.org/document/9410242
+https://math.mit.edu/~gs/linearalgebra/ila5/linearalgebra5_2-5.pdf
+https://research.dial.uclouvain.be/entities/publication/f15e3e1b-78b1-4749-925d-fdc1d60c1694

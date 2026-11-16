@@ -261,7 +261,7 @@ def record_attack(start_byte=0):
 
     try:
         sys.settrace(recorder.trace)
-        result = piret_sm4.recover_sm4_master_key(correct, oracle, start_byte=start_byte)
+        result = piret_sm4.recover_sm4_master_key(correct, oracle, masks=(3, 1, 2, 4, 5, 6, 7, 8), start_byte=start_byte)
     finally:
         sys.settrace(previous_trace)
 

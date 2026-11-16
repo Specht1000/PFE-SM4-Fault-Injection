@@ -44,6 +44,29 @@ The code, comments and interface are written in English.
 
 ## Run
 
+To verify the last-round equations against a real simulated two-bit fault:
+
+```powershell
+python src/prove_sm4_round31.py --mask 03 --byte 0
+```
+
+This checks `inverse_L(delta_R3) = B_faulty XOR B_correct`, demonstrates why
+inverse S-box cannot be distributed over XOR, and verifies the correct
+key equation `inverse_tau(B_faulty) XOR R2 XOR R1 XOR R0 XOR E = rk31`.
+Individual B values are teacher-only states; the ciphertext-only attack must
+still filter candidates from their difference. Results are logged in TXT/HTML.
+
+For a user-controlled animation of matrix construction, elimination, inverse
+application and real SM4 key recovery:
+
+```powershell
+python src/animate_piret_sm4.py
+```
+
+Use Next/Previous, Play/Pause, the timeline and the chapter selector.
+Start with the four-bit teaching matrix, then switch to the real SM4 matrix.
+See [the animation guide](docs/SM4_MATRIX_ANIMATION.md).
+
 An independent English PDF explains every function in `src/piret_sm4.py` with
 short practical examples: [Piret SM4 explained](docs/Piret_SM4_Explained.pdf).
 Rebuild it with `python build_piret_sm4_guide.py`; its LaTeX source is in
