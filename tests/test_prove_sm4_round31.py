@@ -1,5 +1,7 @@
 """Check last-round linear identities and the nonlinear counterexample."""
 from pathlib import Path
+import contextlib
+import io
 import random
 import sys
 import unittest
@@ -19,6 +21,26 @@ class Round31ProofTests(unittest.TestCase):
         self.assertNotEqual(data["inverse_difference"], data["rk"] ^ data["error"])
         self.assertNotEqual(data["inverse_difference"] ^ data["q"], data["rk"])
         self.assertEqual(proof.inverse_sbox_word(data["b_faulty"]) ^ data["q"] ^ data["error"], data["rk"])
+        self.assertEqual(data["teacher_recovered_round_key"], data["rk"])
+        self.assertEqual(data["teacher_faulty_round_key"] ^ data["error"], data["rk"])
+
+    def test_output_uses_correct_expression_and_optional_counterexample(self):
+        key = bytes.fromhex("0123456789ABCDEFFEDCBA9876543210")
+        data = proof.calculate(key, key, mask=0xFF)
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            proof.show(data)
+
+        self.assertIn("rk = tau^-1(B_faulty) XOR R2 XOR R1 XOR R0 XOR E", output.getvalue())
+        self.assertNotIn("OPTIONAL COUNTEREXAMPLE", output.getvalue())
+        self.assertNotIn("tau^-1(B_faulty XOR B_correct)", output.getvalue())
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            proof.show(data, show_counterexample=True)
+
+        self.assertIn("OPTIONAL COUNTEREXAMPLE: NOT A VALID KEY-RECOVERY FORMULA", output.getvalue())
 
     def test_inverse_tau_and_equations_for_multiple_positions_and_keys(self):
         rng = random.Random(20261116)

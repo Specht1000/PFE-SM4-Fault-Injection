@@ -55,6 +55,8 @@ inverse S-box cannot be distributed over XOR, and verifies the correct
 key equation `inverse_tau(B_faulty) XOR R2 XOR R1 XOR R0 XOR E = rk31`.
 Individual B values are teacher-only states; the ciphertext-only attack must
 still filter candidates from their difference. Results are logged in TXT/HTML.
+The normal output presents only the correct recovery equations. Add
+`--show-counterexample` to inspect the old invalid expression separately.
 
 For a user-controlled animation of matrix construction, elimination, inverse
 application and real SM4 key recovery:

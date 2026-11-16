@@ -1,0 +1,102 @@
+\subsection{An equivalent inverse without building a matrix}
+\label{sec:inverse_without_matrix}
+For SM4's particular data transformation $L$, the matrix implementation can be
+replaced by three applications of the \emph{forward} map followed by an eight-bit
+right rotation:
+\[
+\boxed{L^{-1}(y)=\operatorname{ROR}_8\bigl(L(L(L(y)))\bigr).}
+\]
+These are not three decryptions, three fault injections, or three cipher rounds.
+They are local evaluations of the same public word transformation.
+The existing matrix implementation remains active in \texttt{piret\_sm4.py};
+this alternative is provided there as a commented replacement.
+
+\subsubsection*{Why the identity holds for every 32-bit input}
+Write $\rho_n$ for a 32-bit left rotation by $n$ bits and $I$ for the identity
+map. This notation avoids confusing rotations with the diagram's output words
+$R_0,R_1,R_2,R_3$. Rotations commute and compose by adding their amounts:
+$\rho_a\rho_b=\rho_{a+b}$, with amounts reduced modulo 32.
+The data map is
+\[
+L=I\xor\rho_2\xor\rho_{10}\xor\rho_{18}\xor\rho_{24}.
+\]
+When this sum is composed with itself, each cross term occurs twice and cancels
+over GF(2). Only the squared terms remain:
+\[
+\begin{aligned}
+L^2
+&=I\xor\rho_4\xor\rho_{20}\xor\rho_{36}\xor\rho_{48}\\
+&=I\xor\underbrace{\rho_4\xor\rho_4}_{0}\xor\rho_{20}\xor\rho_{16}\\
+&=I\xor\rho_{20}\xor\rho_{16}.
+\end{aligned}
+\]
+Apply the same cancellation once more:
+\[
+\begin{aligned}
+L^4&=(L^2)^2=I\xor\rho_{40}\xor\rho_{32}\\
+&=\underbrace{I\xor I}_{0}\xor\rho_8=\rho_8.
+\end{aligned}
+\]
+Now let the observed input to the inverse be $y=L(x)$. Three additional
+applications give
+\[
+L^3(y)=L^4(x)=\operatorname{ROL}_8(x).
+\]
+Rotating right by 8 restores $x$. Because rotations commute with $L$, the same
+formula is also a right inverse; it is the unique inverse represented by the
+matrix method. This is an algebraic derivation from the definition of $L$,
+not a property of arbitrary invertible matrices or the key-schedule map $L'$.
+
+\subsubsection*{Optional Python implementation}
+\begin{Verbatim}
+def inverse_linear(value):
+    # Three applications of the FORWARD data map.
+    result = sm4.linear(value)
+    result = sm4.linear(result)
+    result = sm4.linear(result)
+
+    # A left rotation by 24 is a right rotation by 8 on 32 bits.
+    result = sm4.rotl(result, 24)
+
+    return result
+\end{Verbatim}
+Only one function named \texttt{inverse\_linear} should be active at a time.
+Replacing the implementation does not change the candidate equations or the
+recovered keys. No inverse S-box is involved in this transformation.
+
+\subsubsection*{Use the same numerical example as the matrix section}
+The previous example has $y=\texttt{734E3D3D}$. The following values are
+generated and checked against the current cipher functions:
+\input{generated/inverse_rotation_example.tex}
+
+\begin{center}
+\begin{tikzpicture}[node distance=4mm,every node/.style={font=\small},box/.style={draw,rounded corners,align=center,fill=teal!5,minimum height=12mm,text width=25mm}]
+\node[box] (a) {\texttt{734E3D3D}\\observed $y$};
+\node[box,right=of a] (b) {\texttt{4F04BF00}\\after $L$};
+\node[box,right=of b] (c) {\texttt{9DA47A90}\\after $L$};
+\node[box,right=of c] (d) {\texttt{0000004F}\\after $L$};
+\node[box,right=of d] (e) {\texttt{4F000000}\\right rotate 8};
+\draw[-{Stealth}] (a)--(b);\draw[-{Stealth}] (b)--(c);
+\draw[-{Stealth}] (c)--(d);\draw[-{Stealth}] (d)--(e);
+\end{tikzpicture}
+\end{center}
+The final rotation is explicitly
+\[
+\begin{aligned}
+\operatorname{ROR}_8(\texttt{0000004F})
+&=(\texttt{0000004F}\gg8)
+\mathbin{|}\bigl((\texttt{0000004F}\ll24)\mathbin{\&}\texttt{FFFFFFFF}\bigr)\\
+&=\texttt{00000000}\mathbin{|}\texttt{4F000000}
+=\texttt{4F000000}.
+\end{aligned}
+\]
+Thus both implementations return the \emph{same difference}
+$\Delta B=\texttt{4F000000}$, not the individual clean S-box output.
+The forward check is $L(\texttt{4F000000})=\texttt{734E3D3D}$.
+The builder additionally checks both implementations on all 32 unit vectors;
+their linearity makes agreement on this basis sufficient for all 32-bit words.
+
+\note{The matrix version explains how to invert any suitable binary linear map.
+The rotation version exploits a special identity of this SM4 map and avoids
+building or storing its inverse matrix. Both are correct representations of
+the same operation; this guide does not claim a measured performance advantage.}

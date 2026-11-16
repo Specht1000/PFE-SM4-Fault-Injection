@@ -3,5 +3,13 @@
 \item Student-provided handwritten notes, \emph{AES/SM4 notes}, 27 pages, including AES fundamentals, Piret--Quisquater, SM4 fundamentals, and an SM4 DFA example.
 \item NIST, \emph{FIPS 197: Advanced Encryption Standard (AES)} (algorithm and official AES test vector).
 \item ISO/IEC 18033-3, \emph{Encryption algorithms --- Part 3: Block ciphers} (SM4 specification); SM4 test vector as reproduced in the supplied notes.
+\item R. Tse and W. Wong, \emph{The SM4 Block Cipher Algorithm And Its Modes Of Operations}, Internet-Draft \texttt{draft-crypto-sm4-00}, September 2017. Section 6.3 defines the data linear transformation $L$. Work in progress; this document is not an RFC.\\
+\url{https://datatracker.ietf.org/doc/html/draft-crypto-sm4-00#section-6.3}
+\item Q. Guo, Z. Ke, S. Wang and S. Zheng, \emph{Persistent Fault Analysis Against SM4 Implementations in Libraries Crypto++ and GMSSL}, IEEE Access, vol.~9, pp.~63636--63645, 2021. DOI: \href{https://doi.org/10.1109/ACCESS.2021.3074708}{10.1109/ACCESS.2021.3074708}. Reference for inverse linear transformation and fault analysis of SM4; its persistent-fault model differs from this report's controlled transient XOR model.\\
+\url{https://ieeexplore.ieee.org/document/9410242}
+\item G. Strang, \emph{Introduction to Linear Algebra}, 5th edition, Section 2.5, ``Inverse Matrices.'' MIT-hosted chapter excerpt, including Gauss--Jordan inversion of $[A\mid I]$ to $[I\mid A^{-1}]$. The report applies this method over GF(2).\\
+\url{https://math.mit.edu/~gs/linearalgebra/ila5/linearalgebra5_2-5.pdf}
+\item G. Piret and J.-J. Quisquater, \emph{A Differential Fault Attack Technique against SPN Structures, with Application to the AES and KHAZAD}, CHES 2003, Lecture Notes in Computer Science, vol.~2779, pp.~77--88. DOI: \href{https://doi.org/10.1007/978-3-540-45238-6_7}{10.1007/978-3-540-45238-6\_7}. UCLouvain publication record. This is the original AES/KHAZAD reference, rather than a direct specification of the project's SM4 adaptation.\\
+\href{https://research.dial.uclouvain.be/entities/publication/f15e3e1b-78b1-4749-925d-fdc1d60c1694}{UCLouvain publication record (online).}
 \end{enumerate}
 \note{The SM4 DFA chapter uses a deliberately strong fault assumption: known XOR magnitude at a specified S-box input. Experimental fault injection must establish whether that assumption is justified. Full recovery requires additional observations from earlier rounds; no full physical recovery of all four SM4 final round keys is claimed here.}

@@ -80,6 +80,14 @@ def calculate(plaintext, key, byte=0, mask=3):
     assert delta_b == b_faulty ^ b_correct
     assert sm4.linear(delta_b) == delta_x
 
+    # Correct recovery equations use each individual B, not inverse_tau(DeltaB).
+    # These values are available here only because this is an instrumented target.
+    faulty_input = inverse_sbox_word(b_faulty)
+    clean_input = inverse_sbox_word(b_correct)
+    faulty_round_key = faulty_input ^ q
+    recovered_round_key = faulty_round_key ^ error
+    clean_round_key = clean_input ^ q
+
     # Individual B values can be inverted; inverse tau is not XOR-linear.
     assert inverse_sbox_word(b_correct) == a_correct
     assert inverse_sbox_word(b_faulty) == a_faulty
@@ -87,6 +95,8 @@ def calculate(plaintext, key, byte=0, mask=3):
     assert inverse_sbox_word(b_faulty) ^ q == rk ^ error
     assert inverse_sbox_word(b_faulty) ^ q ^ error == rk
     assert inverse_sbox_word(b_correct) ^ q == rk
+    assert faulty_round_key == rk ^ error
+    assert recovered_round_key == clean_round_key == rk
 
     # Individual B values require hidden W0, unlike the observable difference.
     assert piret_sm4.inverse_linear(c[0] ^ w0) == b_correct
@@ -96,7 +106,7 @@ def calculate(plaintext, key, byte=0, mask=3):
     candidates, inputs, unused_delta = piret_sm4.sm4_byte_candidates(correct, faulty, byte, mask)
     expected_byte = (rk >> (24 - 8 * byte)) & 255
     assert expected_byte in candidates
-    return dict(correct=correct, faulty=faulty, w0=w0, w1=w1, w2=w2, w3=w3, rk=rk, error=error, a_correct=a_correct, a_faulty=a_faulty, b_correct=b_correct, b_faulty=b_faulty, q=q, delta_x=delta_x, delta_b=delta_b, inverse_difference=inverse_difference, candidates=candidates, inputs=inputs)
+    return dict(correct=correct, faulty=faulty, w0=w0, w1=w1, w2=w2, w3=w3, rk=rk, error=error, a_correct=a_correct, a_faulty=a_faulty, b_correct=b_correct, b_faulty=b_faulty, q=q, delta_x=delta_x, delta_b=delta_b, inverse_difference=inverse_difference, candidates=candidates, inputs=inputs, teacher_faulty_round_key=faulty_round_key, teacher_recovered_round_key=recovered_round_key, teacher_clean_round_key=clean_round_key)
 
 
 def print_colored(text=""):
@@ -160,8 +170,8 @@ def show_inverse_calculation(value):
     return result
 
 
-def show(data):
-    """Print substitutions for the user's diagram and each valid/invalid claim."""
+def show(data, show_counterexample=False):
+    """Present correct identities first; invalid expressions are optional examples."""
     # All lesson lines use the same coloring in the terminal and saved HTML.
     print = print_colored
     d = data
@@ -208,24 +218,24 @@ def show(data):
     assert forward_check == d["delta_x"]
     print("This is DeltaB, not B_correct. W0 cancels because it is unchanged.")
     print("Use only the changing 32-bit R3 word; L^-1 acts on 32 bits, not the whole 128-bit ciphertext.")
-    print("\n3. THE INVERSE S-BOX CANNOT BE DISTRIBUTED OVER XOR")
-    print(f"tau^-1(B_faulty XOR B_correct) = tau^-1({d['delta_b']:08X}) = {d['inverse_difference']:08X}")
-    print("For example, an unchanged S-box output byte gives delta=00, but InvSbox(00)=71, not 00.")
+    print("\n3. INVERT EACH INDIVIDUAL S-BOX OUTPUT, THEN XOR")
+    print(f"tau^-1(B_faulty)  = tau^-1({d['b_faulty']:08X}) = {d['a_faulty']:08X}")
+    print(f"tau^-1(B_correct) = tau^-1({d['b_correct']:08X}) = {d['a_correct']:08X}")
     print(f"tau^-1(B_faulty) XOR tau^-1(B_correct) = {d['a_faulty']:08X} XOR {d['a_correct']:08X} = {d['error']:08X} / PASS")
-    print(f"Claim tau^-1(DeltaB) == rk XOR E: {d['inverse_difference']:08X} == {d['rk'] ^ d['error']:08X} -> {d['inverse_difference'] == (d['rk'] ^ d['error'])}")
-    print("This proposed equality is not an identity; inverse tau is nonlinear.")
+    print("The inverse is applied BEFORE the XOR. This check requires the two individual B values.")
     print("\n4. THE CORRECT KEY EQUATIONS, IF INDIVIDUAL B VALUES ARE AVAILABLE")
     faulty_input = inverse_sbox_word(d["b_faulty"])
     print(f"tau^-1(B_faulty) XOR R2 XOR R1 XOR R0")
     print(f"= {faulty_input:08X} XOR {d['w1']:08X} XOR {d['w2']:08X} XOR {d['w3']:08X}")
-    print(f"= {faulty_input ^ d['q']:08X} = rk XOR E / PASS")
-    print(f"Remove E: {faulty_input ^ d['q']:08X} XOR {d['error']:08X} = {d['rk']:08X} = rk / PASS")
-    print(f"Alternatively tau^-1(B_correct) XOR Q = {d['a_correct']:08X} XOR {d['q']:08X} = {d['rk']:08X} / PASS")
-    wrong = d["inverse_difference"] ^ d["q"]
-    print("\n5. CHECK THE PROPOSED FINAL EXPRESSION")
-    print(f"tau^-1(B_faulty XOR B_correct) XOR R2 XOR R1 XOR R0 = {wrong:08X}")
-    print(f"rk = {d['rk']:08X}; rk XOR E = {d['rk'] ^ d['error']:08X}")
-    print("The XOR of B values cannot replace the individual B_faulty in step 4.")
+    print(f"= {d['teacher_faulty_round_key']:08X} = rk XOR E / PASS")
+    print(f"Alternatively tau^-1(B_correct) XOR Q = {d['a_correct']:08X} XOR {d['q']:08X} = {d['teacher_clean_round_key']:08X} / PASS")
+    print("\n5. CORRECT FINAL EXPRESSION: REMOVE THE FAULT MASK")
+    print("rk = tau^-1(B_faulty) XOR R2 XOR R1 XOR R0 XOR E")
+    print(f"   = {faulty_input:08X} XOR {d['w1']:08X} XOR {d['w2']:08X} XOR {d['w3']:08X} XOR {d['error']:08X}")
+    print(f"   = {d['teacher_faulty_round_key']:08X} XOR {d['error']:08X}")
+    print(f"   = {d['teacher_recovered_round_key']:08X} / PASS")
+    print(f"Reference rk used only for validation: {d['rk']:08X}")
+    print("This direct equation uses teacher-only B_faulty; it is not ciphertext-only key recovery.")
     print("\n6. WHY THE CIPHERTEXT-ONLY ATTACK STILL NEEDS DFA")
     print(f"B_correct = L^-1(R3_correct XOR hidden W0) = {d['b_correct']:08X}")
     print("W0 is hidden, so ciphertexts alone provide DeltaB, not the individual B values used in step 4.")
@@ -236,13 +246,23 @@ def show(data):
         labels.append(f"{value:02X}")
 
     print("Key-byte candidates from this one public pair: " + " ".join(labels))
-    print("All asserted equations passed. Numerical checks illustrate the algebra; they do not make a false identity true.")
+    print("All asserted equations passed. The correct direct key equation uses individual B; public DFA uses candidate intersections.")
+
+    if show_counterexample:
+        # Retain the old expression only behind an explicit educational option.
+        wrong = d["inverse_difference"] ^ d["q"]
+        print("\nOPTIONAL COUNTEREXAMPLE: NOT A VALID KEY-RECOVERY FORMULA")
+        print(f"tau^-1(DeltaB) = {d['inverse_difference']:08X}")
+        print(f"tau^-1(DeltaB) XOR Q = {wrong:08X}")
+        print(f"Claim tau^-1(DeltaB) == rk XOR E -> {d['inverse_difference'] == d['teacher_faulty_round_key']}")
+        print("This proposed equality is not an identity; inverse tau is nonlinear.")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mask", default="01", help="Nonzero hexadecimal byte error, default 03 (two bits).")
+    parser.add_argument("--mask", default="01", help="Nonzero hexadecimal byte error, default %(default)s.")
     parser.add_argument("--byte", type=int, choices=range(4), default=0)
+    parser.add_argument("--show-counterexample", action="store_true", help="Also display the old, invalid inverse-of-XOR expression as a counterexample.")
     args = parser.parse_args(argv)
 
     try:
@@ -253,7 +273,7 @@ def main(argv=None):
     except ValueError as error:
         parser.error(str(error))
 
-    show(data)
+    show(data, args.show_counterexample)
     return 0
 
 

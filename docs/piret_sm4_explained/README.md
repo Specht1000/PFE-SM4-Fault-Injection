@@ -27,6 +27,12 @@ The builder runs the real terminal entry point without pauses and saves its
 output in `generated/execution_terminal.txt`. The underlying numerical history
 is available in `generated/execution_values.json`.
 
+The inverse-linear section also derives `L^4 = ROL8`, shows the optional
+three-forward-applications-plus-ROR8 implementation, and compares its values
+against the matrix method on the same `734E3D3D` example. The build verifies
+agreement on every unit vector and records the checks in
+`generated/inverse_rotation_verification.json`.
+
 Numerical examples are generated and verified from the current implementation.
 `generated/verification.json` records the source hash and function coverage.
 Build logs overwrite `logs/build_piret_sm4_guide.txt` and its HTML counterpart.
@@ -34,5 +40,6 @@ The builder reuses the project's portable Tectonic compiler and package cache.
 
 For an independent Overleaf project, upload `main.tex` and the complete
 `generated/` directory, `row_building_steps.tex` and
-`matrix_visual_walkthrough.tex` and `execution_flow.tex` after a local build.
+`matrix_visual_walkthrough.tex`, `inverse_rotation_alternative.tex` and
+`execution_flow.tex` after a local build.
 Select `main.tex` as the main file.

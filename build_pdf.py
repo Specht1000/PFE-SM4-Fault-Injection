@@ -148,6 +148,43 @@ def build(part=0):
     return destination
 
 
+def verify_sm4_inverse_example():
+    """Check the main report's alternative inverse against the actual matrix."""
+    sys.path.insert(0, str(ROOT / "src"))
+    import sm4
+    import piret_sm4
+
+    values = [0, 0xFFFFFFFF, 0x734E3D3D]
+
+    for bit in range(32):
+        values.append(1 << bit)
+
+    for value in values:
+        alternative = value
+
+        for application in range(3):
+            alternative = sm4.linear(alternative)
+
+        alternative = sm4.rotl(alternative, 24)
+
+        if alternative != piret_sm4.inverse_linear(value) or sm4.linear(alternative) != value:
+            raise RuntimeError("The main report's alternative SM4 inverse failed verification.")
+
+    example = 0x734E3D3D
+    expected = (0x4F04BF00, 0x9DA47A90, 0x0000004F)
+
+    for result in expected:
+        example = sm4.linear(example)
+
+        if example != result:
+            raise RuntimeError("An intermediate value in the main report is incorrect.")
+
+    if sm4.rotl(example, 24) != 0x4F000000:
+        raise RuntimeError("The main report's final inverse example is incorrect.")
+
+    print("Verified main-report inverse example: matrix and three-L-plus-ROR8 methods agree.", flush=True)
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
@@ -159,6 +196,7 @@ def main():
     args = parser.parse_args()
 
     try:
+        verify_sm4_inverse_example()
         build(args.part)
     except KeyboardInterrupt:
         print("\nPDF build interrupted.", file=sys.stderr)

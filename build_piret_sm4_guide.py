@@ -313,6 +313,7 @@ def generate_examples(source):
 
     generated = source / "generated"
     generated.mkdir(exist_ok=True)
+    generate_inverse_rotation_example(generated)
     generate_row_building(generated)
     generate_execution_flow(generated, recovered, key, clean)
     q = recovered["round_keys"][28] ^ recovered["round_keys"][29] ^ recovered["round_keys"][30] ^ sm4.CK[31]
@@ -356,6 +357,39 @@ def generate_examples(source):
     (generated / "source_info.tex").write_text(info, encoding="utf-8")
     (generated / "verification.json").write_text(json.dumps(dict(source_sha256=digest, covered_functions=covered, faulty_outputs=recovered["used"], master_key=recovered["master_key"].hex(), verified=True), indent=2) + "\n", encoding="utf-8")
     print("Verified all 9 functions/callbacks, example calculations and complete 32-output recovery.", flush=True)
+
+
+def generate_inverse_rotation_example(generated):
+    """Check the alternative inverse against the matrix on a full vector basis."""
+    values = [0, 0xFFFFFFFF, 0x734E3D3D, 0x962EB8B8]
+
+    for bit in range(32):
+        values.append(1 << bit)
+
+    for value in values:
+        result = value
+
+        for application in range(3):
+            result = sm4.linear(result)
+
+        result = sm4.rotl(result, 24)
+
+        if result != piret_sm4.inverse_linear(value) or sm4.linear(result) != value:
+            raise RuntimeError("The alternative inverse disagrees with the matrix method.")
+
+    rows = [r"\begin{center}\begin{tabular}{ll}\toprule", r"Operation & Actual result (hex)\\\midrule", r"Input $y$ & \texttt{734E3D3D}\\"]
+    value = 0x734E3D3D
+
+    for application in range(1, 4):
+        value = sm4.linear(value)
+        rows.append("Forward L application " + str(application) + r" & \texttt{" + f"{value:08X}" + r"}\\")
+
+    rotated = sm4.rotl(value, 24)
+    matrix = piret_sm4.inverse_linear(0x734E3D3D)
+    rows.extend([r"Right rotation by 8 & \texttt{" + f"{rotated:08X}" + r"}\\", r"Existing matrix implementation & \texttt{" + f"{matrix:08X}" + r"}\\", r"\bottomrule\end{tabular}\end{center}"])
+    (generated / "inverse_rotation_example.tex").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    (generated / "inverse_rotation_verification.json").write_text(json.dumps(dict(checked_values=values, matrix_result=matrix, alternative_result=rotated, all_equal=True), indent=2) + "\n", encoding="utf-8")
+    print("Verified inverse alternative: three forward L calls + ROR8 agree with the matrix on every basis vector.", flush=True)
 
 
 def main():

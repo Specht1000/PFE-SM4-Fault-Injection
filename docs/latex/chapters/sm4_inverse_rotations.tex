@@ -1,0 +1,98 @@
+\section{An equivalent inverse using only rotations and XOR}
+\label{sec:sm4_inverse_rotations}
+The inverse matrix is one representation of $L^{-1}$, but it is not the only
+way to evaluate it. For the SM4 data transformation, an equivalent formula is
+\[
+\boxed{L^{-1}(y)=\operatorname{ROR}_8\bigl(L(L(L(y)))\bigr).}
+\]
+Apply the normal, forward $L$ three times, using each result as the next input,
+then rotate the final word right by eight bits. These are local word operations,
+not three cipher rounds or three fault observations. On 32-bit words a right
+rotation by 8 equals a left rotation by 24.
+
+\subsection{Derivation from the SM4 definition}
+Let $\rho_n$ denote a 32-bit left rotation by $n$, and let $I$ denote the identity
+map. The symbols $\rho_n$ refer to rotations, not the output state words $R_j$.
+The definition of the data map is
+\[
+L=I\xor\rho_2\xor\rho_{10}\xor\rho_{18}\xor\rho_{24}.
+\]
+Rotations commute and their amounts add under composition:
+$\rho_a\rho_b=\rho_{a+b}$, with indices reduced modulo 32.
+In the composition $L^2$, every cross term appears twice and cancels over GF(2).
+For example, $\rho_2\rho_{10}\xor\rho_{10}\rho_2
+=\rho_{12}\xor\rho_{12}=0$. Therefore
+\[
+\begin{aligned}
+L^2&=I\xor\rho_4\xor\rho_{20}\xor\rho_{36}\xor\rho_{48}\\
+&=I\xor\underbrace{\rho_4\xor\rho_4}_{0}\xor\rho_{20}\xor\rho_{16}\\
+&=I\xor\rho_{20}\xor\rho_{16}.
+\end{aligned}
+\]
+Square this expression once more:
+\[
+\begin{aligned}
+L^4&=(L^2)^2=I\xor\rho_{40}\xor\rho_{32}\\
+&=\underbrace{I\xor I}_{0}\xor\rho_8=\rho_8.
+\end{aligned}
+\]
+If $y=L(x)$, then $L^3(y)=L^4(x)=\operatorname{ROL}_8(x)$.
+A right rotation by 8 recovers $x$, proving the displayed inverse formula for
+all 32-bit inputs. This identity is specific to this $L$; it must not be assumed
+for arbitrary matrices or for the key-schedule transformation $L'$.
+
+\subsection{The same numerical example as the matrix method}
+The worked fault example gives
+\[
+y=\Delta X_{35}=\hex{734E3D3D}.
+\]
+The previous inverse-matrix calculation returned $\Delta B=\hex{4F000000}$.
+The alternative follows this sequence:
+\begin{center}
+\begin{tabular}{ll}\toprule
+Operation & Result (hexadecimal)\\\midrule
+Input $y$ & \hex{734E3D3D}\\
+First forward application $L(y)$ & \hex{4F04BF00}\\
+Second application $L(L(y))$ & \hex{9DA47A90}\\
+Third application $L(L(L(y)))$ & \hex{0000004F}\\
+Final right rotation by 8 & \hex{4F000000}\\
+Inverse-matrix method & \hex{4F000000}\\\bottomrule
+\end{tabular}
+\end{center}
+Each forward application uses
+$L(v)=v\xor\operatorname{ROL}_2(v)\xor\operatorname{ROL}_{10}(v)
+\xor\operatorname{ROL}_{18}(v)\xor\operatorname{ROL}_{24}(v)$.
+For example, the first application expands to
+\[
+\begin{aligned}
+L(\hex{734E3D3D})={}&\hex{734E3D3D}\xor\hex{CD38F4F5}\xor\hex{38F4F5CD}\\
+&\xor\hex{F4F5CD38}\xor\hex{3D734E3D}\\
+={}&\hex{4F04BF00}.
+\end{aligned}
+\]
+All rotations in one application use that application's input $v$, rather than
+its running XOR accumulator. The next application starts only after that XOR
+has been completed.
+
+\begin{center}
+\begin{tikzpicture}[node distance=4mm,box/.style={draw,rounded corners,align=center,fill=pale,text width=24mm,minimum height=12mm,font=\small}]
+\node[box] (a) {\hex{734E3D3D}\\input};
+\node[box,right=of a] (b) {\hex{4F04BF00}\\after $L$};
+\node[box,right=of b] (c) {\hex{9DA47A90}\\after $L$};
+\node[box,right=of c] (d) {\hex{0000004F}\\after $L$};
+\node[box,right=of d] (e) {\hex{4F000000}\\right rotate 8};
+\draw[-{Stealth}] (a)--(b);\draw[-{Stealth}] (b)--(c);
+\draw[-{Stealth}] (c)--(d);\draw[-{Stealth}] (d)--(e);
+\end{tikzpicture}
+\end{center}
+
+The final rotation moves the last byte to the first position:
+\[
+\hex{00 00 00 4F}\ \xrightarrow{\operatorname{ROR}_8}\ \hex{4F 00 00 00}.
+\]
+The forward check gives $L(\hex{4F000000})=\hex{734E3D3D}$.
+Both methods thus recover the same S-box \emph{output difference}
+$B_f\xor B_c$, not the individual clean output $B_c$.
+The matrix method is a general inversion procedure; the rotation formula
+exploits a special algebraic property of SM4. No measured performance comparison
+between the two implementations is claimed here.

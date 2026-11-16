@@ -1,5 +1,5 @@
 {
-  "source_sha256": "424717e680ab76021831a9a6eaa490161342f43b21d4c8d086297ee97c051032",
+  "source_sha256": "175a6081795d91ed383427fa7c9d9f82c5c5e13fc1fd9507beda2ea2a38b7908",
   "covered_functions": [
     "sm4_fault_encrypt",
     "observer",
