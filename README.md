@@ -1,335 +1,192 @@
-# AES & SM4 — Differential Fault Analysis Lab
+﻿# AES & SM4 — Differential Fault Analysis Lab
 
-Educational implementations of **AES-128**, **SM4**, and differential fault
-analysis (DFA), with step-by-step terminal demonstrations and an interactive
-Python GUI.
-
-Developed as part of a **PFE 5A — final-year engineering project at Polytech
-Montpellier**, in collaboration with **STMicroelectronics**, studying fault
-injection and embedded cryptographic implementations, with a focus on SM4.
+Educational Python implementations of AES-128 and SM4, with a current focus on
+controlled round-input fault injection and complete SM4 key recovery.
+Code, comments and execution logs are in English.
 
 ## Author and academic context
 
 | | Information |
 | --- | --- |
-| **Author** | Guilherme Martins Specht |
-| **GitHub** | [@Specht1000](https://github.com/Specht1000) |
-| **Institution** | Polytech Montpellier, France |
-| **Academic project** | PFE 5A — final-year engineering project |
-| **Academic supervisor** | Prof. Philippe Maurine |
-| **Industrial collaboration** | STMicroelectronics |
-| **Research topics** | Fault injection, differential fault analysis, AES and SM4 |
+| Author | Guilherme Martins Specht |
+| GitHub | [@Specht1000](https://github.com/Specht1000) |
+| Institution | Polytech Montpellier, France |
+| Academic project | PFE 5A — final-year engineering project |
+| Academic supervisor | Prof. Philippe Maurine |
+| Industrial collaboration | STMicroelectronics |
+| Research topics | Fault injection, differential fault analysis, AES and SM4 |
 
-## What this project demonstrates
+## Run the SM4 DFA demonstration
 
-- **AES-128:** key expansion, SubBytes, ShiftRows, MixColumns and AddRoundKey,
-  including intermediate states and inverse transformations.
-- **AES Piret-style DFA:** compare correct and faulty ciphertexts, construct
-  final-round key candidates, intersect observations, recover K10 and reverse
-  key expansion to reconstruct the master key.
-- **AES Giraud attack:** inject a single bit before final SubBytes, test inverse
-  S-box differences for Hamming weight one, recover all sixteen K10 bytes and
-  reverse the AES-128 key schedule.
-- **SM4:** key expansion, 32 rounds, S-box substitution, linear diffusion,
-  rolling-state updates, final word reversal and decryption.
-- **SM4 DFA:** recover rk31, rk30, rk29 and rk28 from controlled fault
-  observations, then reverse the schedule to recover the complete master key.
-- **SM4 Giraud-inspired adaptation:** use known or unknown single-bit filtering
-  and undo recovered rounds to obtain all four final subkeys and the master key.
-- **Interactive learning:** choose an algorithm and operation, move through
-  individual steps, animate execution, inspect differences and export JSON reports.
+Run from the repository root with Python 3.9 or newer:
 
-Fault-modified bytes and nonzero XOR differences are highlighted in **red**.
-The code, comments and interface are written in English.
-
-## Run
-
-To verify the last-round equations against a real simulated two-bit fault:
-
-```powershell
-python src/prove_sm4_round31.py --mask 03 --byte 0
-```
-
-This checks `inverse_L(delta_R3) = B_faulty XOR B_correct`, demonstrates why
-inverse S-box cannot be distributed over XOR, and verifies the correct
-key equation `inverse_tau(B_faulty) XOR R2 XOR R1 XOR R0 XOR E = rk31`.
-Individual B values are teacher-only states; the ciphertext-only attack must
-still filter candidates from their difference. Results are logged in TXT/HTML.
-The normal output presents only the correct recovery equations. Add
-`--show-counterexample` to inspect the old invalid expression separately.
-
-For a user-controlled animation of matrix construction, elimination, inverse
-application and real SM4 key recovery:
-
-```powershell
-python src/animate_piret_sm4.py
-```
-
-Use Next/Previous, Play/Pause, the timeline and the chapter selector.
-Start with the four-bit teaching matrix, then switch to the real SM4 matrix.
-See [the animation guide](docs/SM4_MATRIX_ANIMATION.md).
-
-An independent English PDF explains every function in `src/piret_sm4.py` with
-short practical examples: [Piret SM4 explained](docs/Piret_SM4_Explained.pdf).
-Rebuild it with `python build_piret_sm4_guide.py`; its LaTeX source is in
-`docs/piret_sm4_explained/`.
-
-For SM4 Piret debugging with the source view, variables and numerical equations:
-
-```powershell
-python src/debug_piret_sm4.py
-```
-
-The original debugger GUI includes a calculation panel with substituted values
-for the next line and results from the previous line. Its Step, Finish function,
-Auto, Run to end and Restart controls are preserved. `python src/debug_sm4.py`
-opens the same interface.
-See [the debugging guide](docs/DEBUG_SM4_PIRET.md) for shortcuts and live-debugger
-instructions. TXT/HTML execution logs are overwritten per run.
-
-Requires **Python 3.9 or newer**. The GUI also requires **Tkinter**, normally
-included with the standard Python installer on Windows. The demonstrations use
-the Python standard library; no board connection or external Python packages
-are required.
-
-Run these commands from the repository root.
-
-Every terminal execution of `aes.py`, `sm4.py`, `piret_aes.py`, `piret_sm4.py`,
-`giraud_aes.py`, `giraud_sm4.py`, `gui.py` or `run.py` also saves its output in `logs/<script>.txt` and `logs/<script>.html`.
-Each run replaces that program's previous logs instead of appending text or
-creating timestamped files. Old timestamped logs for that program are removed
-automatically. Logs from other programs are preserved. The first line prints
-the complete log path. The files use UTF-8;
-the text file preserves terminal ANSI colors. A matching `.html` file renders
-those colors in a browser, including red fault differences and green recovery
-results. A plain text editor may show ANSI codes rather than colors; open the
-HTML file for the formatted version. Use `--color always` on attack commands to
-retain colors even when stdout is redirected. Standard errors and unexpected
-tracebacks are captured too. The
-`logs/` folder is ignored by Git. Imports do not create logs. A GUI session writes every built lesson, including all
-numerical steps and recovered keys, to `logs/gui.txt`; its colored HTML log is
-finalized when the window closes. Multiple lessons belong to the same session;
-relaunching the GUI replaces its previous session logs. The PDF builder and
-analysis entry point also save their output to `logs/build_pdf.txt` and
-`logs/analysis.txt`, with matching HTML files.
-
-**Terminal — AES + Piret, followed by SM4 + DFA:**
-
-```powershell
-python src/run.py
-```
-
-**GUI — select AES or SM4, then Encrypt, Decrypt or Fault analysis:**
-
-```powershell
-python src/gui.py
-```
-
-Choose **Giraud attack** in the GUI's Lesson selector for either algorithm.
-The bit position is unknown to the solver by default. Enable **Giraud: exact bit
-known to solver** for the stronger controlled-mask model. Use one of the masks
-`01`, `02`, `04`, `08`, `10`, `20`, `40`, `80` and 1–8 distinct observations per byte.
-The row/column fields select the first AES input byte; all sixteen bytes are
-processed. For SM4, row selects the first S-box byte and all four are processed.
-
-The candidate functions in `src/giraud_aes.py` and `src/giraud_sm4.py` accept
-ciphertext observations and do not receive a secret key. Each module has its
-own terminal entry point, independently of Tkinter. Visual reports and interface code stay
-in `src/gui.py`. Ambiguous observations never produce a claimed recovered key.
-
-```powershell
-python src/giraud_aes.py
-python src/giraud_sm4.py
-```
-
-The terminal explains per-pair byte guesses, candidate intersections and complete
-master-key recovery for both algorithms. AES prints every reversed schedule word
-and K9 through K0. SM4 shows round peeling, rk31 through rk28 recovered from
-faults, rk27 through rk0 derived from the schedule, and the final FK removal.
-Unknown-bit mode displays all eight permitted errors; only `--known-bit` shares
-the exact simulator mask with the candidate solver. Add `--step` for pauses.
-
-Choose the AES or SM4 script above. Use `--step` for pauses and `--known-bit`
-to share the exact fault mask with the solver. Each script runs its own cipher
-with unknown-bit filtering by default and recovers its complete master key.
-
-The controlled-byte SM4 attack is also available directly:
-
-```powershell
+~~~powershell
 python src/piret_sm4.py
-```
+~~~
 
-This command explains each byte candidate, restores earlier round views with
-already recovered subkeys, and assembles rk31 through rk28 from DFA observations.
-It then prints all inverse-schedule equations, derives rk27 through rk0, removes
-the four FK constants and assembles the original master key. Earlier subkeys are
-explicitly labeled as schedule-derived. Add `--step` to pause during the lesson.
+This command uses only the Python standard library. Cipher operations come
+from sm4.py, independently of aes.py. No board connection is needed.
 
-The terminal supports optional step-by-step pauses with `--step`. In the GUI,
-use **Load standard example**, then **Build lesson**. Navigate with Previous/Next,
-the slider, the step selector or automatic playback.
+The attack:
 
-## Fault models and recovery scope
+1. Captures a correct ciphertext.
+2. Injects a byte XOR fault into a round input, before XOR with the subkey.
+3. Compares ciphertexts, including the changed pass-through word.
+4. Applies the inverse linear transformation to the newest-word difference.
+5. Tests all 256 subkey-byte candidates and intersects observations until unique.
+6. Recovers rk31, rk30, rk29 and rk28, undoing later rounds with recovered keys.
+7. Reverses the key schedule and removes FK to reconstruct the master key.
+8. Verifies the recovered key by encryption and decryption.
 
-### Focused SM4 comparison
+The solver receives ciphertexts and fault descriptors. It does not receive
+the target key or hidden round traces. The target and final verification own
+the reference key. Full master-key recovery requires fault observations from
+all four tail rounds; faults confined to round 31 recover its subkey alone.
 
-Run a paired comparison of controlled SM4 DFA and the Giraud-inspired models:
+### Choose the error and initial byte
 
-```powershell
-python analysis/compare_sm4_attacks.py --trials 100 --seed 20261110
-```
+Edit the constants near the start of [piret_sm4.py](src/piret_sm4.py):
 
-Results are saved in `analysis/results/sm4_comparison/`: an English report,
-raw observations, CSV tables, PNG/SVG figures and `comparison.pdf`. The command
-also writes `logs/compare_sm4_attacks.txt` and its colored HTML counterpart.
-Plotting requires Matplotlib. The comparison includes a matched-mask control:
-known-mask Piret and known-bit Giraud must produce identical candidate histories
-on identical single-bit observations. Unknown-bit filtering is evaluated
-separately. Timings measure offline host recovery with cached target outputs;
-they exclude physical acquisition and target encryption.
+~~~python
+FAULT_MASK = 0x01  # First XOR error: 0x01..0xFF
+FAULT_BYTE = 0     # First target byte: 0..3, big-endian order
+~~~
 
-The same command also exports `key_recovery_report.md`, `key_recovery.pdf`,
-per-subkey CSV data and four additional figures covering byte costs, subkey
-milestones, partial recovery and full master-key/schedule verification.
-To regenerate these recovery analyses from saved measurements:
+These select the first error and byte. The attack uses additional distinct
+masks to resolve ambiguity and visits all four bytes of each subkey.
+An insufficient observation budget is reported as incomplete recovery.
 
-```powershell
-python analysis/analyze_sm4_recovery.py
-```
+Useful options:
 
-This standalone command writes `logs/analyze_sm4_recovery.txt` and its colored
-HTML counterpart without repeating the timing experiments.
+~~~powershell
+python src/piret_sm4.py --step
+python src/piret_sm4.py --word 2 --row 1 --faults 8
+python src/piret_sm4.py --key 0123456789ABCDEFFEDCBA9876543210 --plaintext 0123456789ABCDEFFEDCBA9876543210
+python src/piret_sm4.py --help
+~~~
 
-### Code responsibilities
+| Option | Meaning |
+| --- | --- |
+| --step | Pause after each faulty encryption, before candidate testing |
+| --word 1, 2 or 3 | Inject into X[i+1], X[i+2] or X[i+3]; default: 1 |
+| --row 0..3 | Override the first byte selected by FAULT_BYTE |
+| --faults 1..255 | Maximum observations per byte; default: 8 |
+| --key HEX | Target master key, exactly 16 bytes |
+| --plaintext HEX | Plaintext, exactly 16 bytes |
+| --color auto/always/never | Control terminal colors |
+| --log PATH | HTML output path; TXT uses the same basename |
 
-- `aes.py` and `sm4.py` implement normal encryption/decryption. Their block
-  functions return bytes without printing or pausing; their `main()` functions
-  show only normal input/output and round-trip verification.
-- `piret_aes.py`, `piret_sm4.py`, `giraud_aes.py` and `giraud_sm4.py` inject
-  faults through external observer functions
-  attached to the actual cipher execution. They do not run separate copies of
-  AES/SM4. Candidate solvers use ciphertext observations rather than secret keys.
-- `gui.py` presents the actual execution traces, comparisons and explanations.
-  `run.py` is the combined terminal entry point.
-- The optional observer is a generic experiment interface. With no observer,
-  the cipher follows its normal algorithm and no fault is injected.
+Default key and plaintext come from KEY and PLAINTEXT in src/sm4.py.
 
-```powershell
-python src/aes.py
-python src/sm4.py
-python src/piret_aes.py
-python src/piret_sm4.py
-python src/giraud_aes.py
-python src/giraud_sm4.py
-```
+### Logs
 
-### AES
+Each run overwrites two files:
 
-The combined terminal and GUI demonstrations follow the project PDF's model:
-a single-byte fault before **MixColumns in round 9**. Independent observations
-constrain one four-byte group of K10 at a time. Processing all four columns
-allows reconstruction of K10 and reversal of the AES-128 key schedule.
+- logs/log.html: continuous terminal-style transcript with inline colors.
+- logs/log.txt: the same lesson as plain text.
 
-The standalone `piret_aes.py` terminal lesson also provides a **round-8 fault model**,
-which propagates to all four groups. The recovery function uses ciphertext
-observations; the simulation key is used by the target and for final verification.
-Recovery stops only when the candidate groups are unique.
+Open the generated HTML in a browser. Red highlights changed bytes and rejected
+candidate results. Blue and purple distinguish the two candidate computations;
+yellow marks candidates and reference values; green marks matches and results.
+Hidden target states are omitted. Values derived by undoing rounds with
+recovered subkeys are shown as part of the attack.
 
-### SM4
+The logs folder is ignored by Git. Files appear after running the demonstration.
 
-Full recovery extends the PDF's last-round model to controlled faults in each
-of the final four rounds, indexed **31, 30, 29 and 28**. First recover rk31 from
-ciphertext differences. Use that recovered key to undo round 31 in both outputs,
-then apply the same differential equations to round 30. Repeat until rk28 is
-known, and reverse the key schedule using the four **DFA-recovered** subkeys.
+### Equations
 
-No reference subkeys are supplied to the solver. Its inputs are the correct
-ciphertext and an oracle returning outputs for selected round/byte faults. The
-controlled-byte model knows the XOR mask; the Giraud-inspired model can test all
-eight bit positions without knowing which one was injected. A stage with multiple
-remaining candidates stops recovery before an unknown key could be used.
+SM4 emits its final words in reverse order:
 
-This requires fault access to all four target rounds; last-round faults alone
-still recover only rk31. The multi-round experiment is an extension of the PDF,
-not a claim that the original last-round worked example already recovers the
-master key. Re-encryption verifies the final result in the terminal and GUI.
+~~~text
+Ciphertext = X[35] || X[34] || X[33] || X[32]
+~~~
 
-These are **software fault simulations**. They support understanding and checking
-the fault models; they do not establish that physical clock or voltage glitches
-produce the same controlled errors. The educational implementations expose
-internal states and are not intended for production cryptographic use.
+At the attacked round:
 
-## Repository structure
+~~~text
+q        = X[i+1] XOR X[i+2] XOR X[i+3]
+q_faulty = X'[i+1] XOR X'[i+2] XOR X'[i+3]
+DeltaB   = inverse_L(X[i+4] XOR X'[i+4])
+~~~
 
-```text
-src/
-  aes.py                   Didactic AES-128 implementation
-  sm4.py                   SM4 implementation and configurable example inputs
-  piret_aes.py             AES DFA helpers and terminal key-recovery lesson
-  piret_sm4.py             Controlled SM4 DFA and full master-key recovery
-  giraud_aes.py            AES single-bit Giraud attack
-  giraud_sm4.py            SM4 single-bit adaptation and full key recovery
-  giraud_common.py         Shared mask validation and candidate intersections
-  giraud_terminal.py       Shared terminal presentation for Giraud lessons
-  attack_steps.py          Numerical teaching stages shared by terminal and GUI
-  run.py                   Combined terminal demonstrations matching the notes
-  gui.py                   Interactive AES / SM4 / DFA interface
-docs/
-  AES_SM4_DFA.pdf           Encryption, fault models and recovery explanations
-  AES_SM4_Scratch.pdf       Supporting project notes
-  Piret_AES.pdf             Supporting AES DFA document
-tests/
-  test_combined_demo.py     PDF values, fault models and terminal highlighting
-  test_crypto_lab.py        Cipher checks, GUI lessons and optional Tk tests
-  test_piret_terminal.py    AES key recovery and terminal behavior
-```
+For each byte, test every candidate k:
 
-Configure the terminal examples through `KEY` and `PLAINTEXT` in `src/aes.py`
-and `src/sm4.py`. Each value represents exactly 16 bytes in hexadecimal.
-The GUI accepts its own key and input fields. Operations use raw single blocks,
-without message padding or an authenticated encryption format.
+~~~text
+S(q_byte XOR k) XOR S(q_faulty_byte XOR k) == DeltaB_byte
+~~~
+
+The unchanged oldest word X[i] cancels in the output XOR; its secret value
+is not needed to filter candidates. The active inverse uses:
+
+~~~text
+inverse_L(y) = ROR_8(L(L(L(y))))
+~~~
+
+This follows from L^4(x) = ROL_8(x). It applies to the data transformation L,
+rather than the key-schedule transformation L'.
+
+## Current source files
+
+| File | Purpose and current status |
+| --- | --- |
+| [aes.py](src/aes.py) | AES-128 encryption, decryption and key expansion |
+| [sm4.py](src/sm4.py) | SM4 encryption, decryption, key expansion and validation |
+| [piret_aes.py](src/piret_aes.py) | AES DFA source; its terminal lesson still references removed support modules |
+| [piret_sm4.py](src/piret_sm4.py) | Independent SM4 input-fault DFA lesson and colored logging |
+
+The former GUI, Giraud modules, combined runner, debugger and animations have
+been removed. Direct execution of aes.py and sm4.py still references the removed
+terminal_log.py. Their cipher functions remain usable through imports.
+
+To run their normal encryption/decryption examples without the old entry-point
+wrapper:
+
+~~~powershell
+python -c "import sys; sys.path.insert(0, 'src'); import aes; aes.main()"
+python -c "import sys; sys.path.insert(0, 'src'); import sm4; sm4.main()"
+~~~
+
+These examples print to the terminal. The independent SM4 DFA command provides
+the current HTML/TXT logging.
 
 ## Validation
 
-Tests cover known-answer vectors, independent OpenSSL comparisons when OpenSSL
-is available, encryption/decryption consistency, fault propagation, candidate
-intersections, key-schedule reversal, ambiguous observations, terminal colors
-and GUI workflows. GUI integration checks use a hidden Tk window.
+~~~powershell
+python tools/test_sm4_input_dfa.py
+~~~
 
-Full SM4 recovery tests use random keys and a precomputed ciphertext-only oracle.
-They block access to `sm4.key_expansion` while the solver runs, verifying that
-recovery succeeds without reading a reference schedule.
+The six tests cover the official SM4 vector, observable input-fault propagation,
+all three selectable input words and all four bytes across the tail rounds,
+random-key recovery, ambiguous observations, invalid fault descriptors, and
+HTML/TXT generation with overwrite behavior.
 
-The default public vectors include:
+## Documents and supporting material
 
-| Cipher | Plaintext | Key | Ciphertext |
-| --- | --- | --- | --- |
-| AES-128 | `00112233445566778899AABBCCDDEEFF` | `000102030405060708090A0B0C0D0E0F` | `69C4E0D86A7B0430D8CDB78070B4C55A` |
-| SM4 | `0123456789ABCDEFFEDCBA9876543210` | `0123456789ABCDEFFEDCBA9876543210` | `681EDF34D206965E86B3E94F536E4246` |
+- [AES_SM4_DFA.pdf](docs/AES_SM4_DFA.pdf): main project report.
+- [AES_SM4_Scratch.pdf](docs/AES_SM4_Scratch.pdf): supporting notes.
+- [Piret_AES.pdf](docs/Piret_AES.pdf): supporting AES DFA document.
+- [Piret_SM4_Explained.pdf](docs/Piret_SM4_Explained.pdf): earlier implementation walkthrough.
+- [Algorithm_Analysis.pdf](docs/Algorithm_Analysis.pdf): saved analysis.
+- [Presentation](docs/Apresentation_PFE.pptx).
+- [Reference links](docs/references.txt).
+- [Main LaTeX sources](docs/latex/).
 
-## Reproducible analysis
+Some PDFs, guides and saved results describe previous versions. Their GUI,
+matrix-inversion or Giraud examples may differ from the current implementation.
+The former root-level PDF build scripts have been removed.
 
-Install plotting dependencies with `python -m pip install -r analysis/requirements.txt`,
-then run `python analysis/run_analysis.py` to measure plaintext/key avalanche,
-ciphertext statistics, exact S-box differential/linear/algebraic properties,
-encryption/decryption time and Python allocations, and Piret/Giraud key recovery
-for both ciphers. The experiment saves a Portuguese report, raw JSON observations
-and avalanche CSV in [`analysis/results/`](analysis/results/), along with seven
-PNG/SVG figures, a PDF and an HTML gallery. Use `python analysis/plot_results.py`
-to regenerate the figures from saved measurements without repeating experiments.
-See [`analysis/README.md`](analysis/README.md) for sample sizes, reproducibility
-and the distinction between software measurements and physical fault injection.
+The analysis folder retains scripts, plotting dependencies and saved results
+from earlier experiments. Several experiment scripts still import removed
+Giraud or logging modules; they are not current runnable entry points.
+Supporting generators in tools and the LaTeX lesson folders may also reference
+previous modules. The commands documented above are the verified current paths.
 
-## Reading
+## Scope
 
-### Project references
+This project studies single-block algorithms and simulated controlled faults.
+It does not implement authenticated message encryption or a physical fault
+campaign. A controlled software XOR fault does not establish hardware
+reproducibility.
 
-- [Project explanation: AES and SM4 DFA](docs/AES_SM4_DFA.pdf)
-- [Supporting handwritten notes](docs/AES_SM4_Scratch.pdf)
-- [Supporting AES DFA document](docs/Piret_AES.pdf)
-- [NIST FIPS 197 — Advanced Encryption Standard](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf)
-- [Piret and Quisquater, CHES 2003 — institutional publication record](https://research.dial.uclouvain.be/entities/publication/f15e3e1b-78b1-4749-925d-fdc1d60c1694)
-
-This repository documents an academic learning and research project. References
-to Polytech Montpellier and STMicroelectronics describe its academic and
-industrial context.
+The SM4 attack is an educational DFA adaptation. The original
+Piret–Quisquater work concerns AES and KHAZAD, rather than this SM4 fault model.

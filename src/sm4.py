@@ -172,11 +172,17 @@ def generate_round_key(k: list[int], round: int) -> int:
 # ============================================================================
 
 
+def validate_block(data, label="SM4 block"):
+    """Validate a complete SM4 block or key using SM4's own block size."""
+    # Both SM4 blocks and master keys contain exactly 128 bits (16 bytes).
+    if len(data) != BLOCK_SIZE:
+        raise ValueError(f"{label} must contain exactly {BLOCK_SIZE} bytes.")
+
+
 def key_expansion(key: bytes) -> list[int]:
     """Return rk0..rk31; each is one new word from the key recurrence."""
 
-    if len(key) != BLOCK_SIZE:
-        raise ValueError("SM4 key must contain exactly 16 bytes.")
+    validate_block(key, "SM4 key")
 
     master_words = struct.unpack(">4I", key)
 
@@ -209,8 +215,7 @@ def sm4_process_block(block: bytes, key: bytes, encrypt: bool, observer=None) ->
     Reversing only the key order is sufficient to run the inverse cipher.
     """
 
-    if len(block) != BLOCK_SIZE:
-        raise ValueError("SM4 block must contain exactly 16 bytes.")
+    validate_block(block)
 
     state = list(struct.unpack(">4I", block))
 
