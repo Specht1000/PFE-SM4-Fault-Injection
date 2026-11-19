@@ -6,3 +6,4 @@ __pycache__/
 /logs/
 /.tools/
 /.build/
+/chipwhisperer/sm4/build/

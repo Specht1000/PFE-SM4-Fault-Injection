@@ -1,0 +1,2 @@
+# Only the host communication script needs this package.
+chipwhisperer>=5.7,<7

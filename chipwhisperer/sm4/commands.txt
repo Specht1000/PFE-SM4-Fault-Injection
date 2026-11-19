@@ -1,0 +1,36 @@
+# Run from the repository root in PowerShell.
+# Firmware runs on the STM32F303 TARGET, not the CW1173 capture controller.
+
+# 1. Install host communication dependencies in your active Python environment.
+python -m pip install -r chipwhisperer/sm4/requirements.txt
+
+# 2. Download only the official MCU SDK. Skip if already present.
+git clone --depth 1 --filter=blob:none --sparse https://github.com/newaetech/chipwhisperer.git .build/chipwhisperer-sdk
+git -C .build/chipwhisperer-sdk sparse-checkout set firmware/mcu
+
+# 3. Build. GNU Arm tools, GNU make and sh must be available.
+# On this PC the CubeIDE Arm compiler and MinGW make were found automatically.
+# Git for Windows supplies sh and Unix utilities, detected by build.py.
+python chipwhisperer/sm4/build.py
+
+# Alternatively use an existing full ChipWhisperer repository:
+# python chipwhisperer/sm4/build.py --sdk "C:/path/to/chipwhisperer"
+
+# 4. Connect the CW-Lite ARM over USB. Program the STM32 and verify encrypt/decrypt.
+python chipwhisperer/sm4/client.py --program chipwhisperer/sm4/build/pfe-sm4-CWLITEARM.hex
+
+# 5. Later sessions: reuse the installed firmware, without flashing again.
+python chipwhisperer/sm4/client.py
+
+# 6. Encrypt a custom block using the target.
+python chipwhisperer/sm4/client.py --operation encrypt --key 0123456789ABCDEFFEDCBA9876543210 --input 0123456789ABCDEFFEDCBA9876543210
+
+# 7. Decrypt the official ciphertext on the target.
+python chipwhisperer/sm4/client.py --operation decrypt --key 0123456789ABCDEFFEDCBA9876543210 --input 681EDF34D206965E86B3E94F536E4246
+
+# 8. Raise the trigger only during the final encryption round and capture its power.
+# This command does not inject a physical or software fault.
+python chipwhisperer/sm4/client.py --trigger-round 31 --capture --samples 5000
+
+# 9. Local validation without USB hardware (native GCC required for C tests).
+python tools/test_chipwhisperer_sm4.py

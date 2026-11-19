@@ -16,6 +16,24 @@ Code, comments and execution logs are in English.
 | Industrial collaboration | STMicroelectronics |
 | Research topics | Fault injection, differential fault analysis, AES and SM4 |
 
+## SM4 on the ChipWhisperer Lite ARM target
+
+The [hardware project](chipwhisperer/sm4/README.md) contains C firmware for the
+CW1173 Lite ARM's STM32F303 target, a Makefile, a build helper and a Python
+client for programming, encryption, decryption and optional power capture.
+Copyable setup and flashing steps are in [commands.txt](chipwhisperer/sm4/commands.txt).
+The hardware client has its own Python dependency file in that folder.
+
+After building the firmware:
+
+~~~powershell
+python chipwhisperer/sm4/client.py --program chipwhisperer/sm4/build/pfe-sm4-CWLITEARM.hex
+~~~
+
+The C core and Cortex-M4 build have been checked locally. Programming and
+measurements still need validation on the physical board. The hardware
+firmware runs normal SM4; the software DFA demonstration below remains separate.
+
 ## Run the SM4 DFA demonstration
 
 Run from the repository root with Python 3.9 or newer:
