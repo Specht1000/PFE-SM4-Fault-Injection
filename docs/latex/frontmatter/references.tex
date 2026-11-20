@@ -1,7 +1,8 @@
 \chapter*{References and Scope}\addcontentsline{toc}{chapter}{References and Scope}
 \begin{enumerate}
-\item Student-provided handwritten notes, \emph{AES/SM4 notes}, 27 pages, including AES fundamentals, Piret--Quisquater, SM4 fundamentals, and an SM4 DFA example.
-\item NIST, \emph{FIPS 197: Advanced Encryption Standard (AES)} (algorithm and official AES test vector).
+\raggedright
+\item Student-provided SM4 notes and worked differential-fault example.
+\item NIST, \emph{FIPS 197: Advanced Encryption Standard (AES)}. Background reference for the final comparison chapter only.
 \item ISO/IEC 18033-3, \emph{Encryption algorithms --- Part 3: Block ciphers} (SM4 specification); SM4 test vector as reproduced in the supplied notes.
 \item R. Tse and W. Wong, \emph{The SM4 Block Cipher Algorithm And Its Modes Of Operations}, Internet-Draft \texttt{draft-crypto-sm4-00}, September 2017. Section 6.3 defines the data linear transformation $L$. Work in progress; this document is not an RFC.\\
 \url{https://datatracker.ietf.org/doc/html/draft-crypto-sm4-00#section-6.3}
@@ -11,5 +12,19 @@
 \url{https://math.mit.edu/~gs/linearalgebra/ila5/linearalgebra5_2-5.pdf}
 \item G. Piret and J.-J. Quisquater, \emph{A Differential Fault Attack Technique against SPN Structures, with Application to the AES and KHAZAD}, CHES 2003, Lecture Notes in Computer Science, vol.~2779, pp.~77--88. DOI: \href{https://doi.org/10.1007/978-3-540-45238-6_7}{10.1007/978-3-540-45238-6\_7}. UCLouvain publication record. This is the original AES/KHAZAD reference, rather than a direct specification of the project's SM4 adaptation.\\
 \href{https://research.dial.uclouvain.be/entities/publication/f15e3e1b-78b1-4749-925d-fdc1d60c1694}{UCLouvain publication record (online).}
+\item morchidy, \emph{Hardware-Security-Labs}, GitHub repository. Hands-on hardware-security laboratories covering side-channel analysis and clock-glitch fault injection on ARM Cortex-M4 using ChipWhisperer. Supporting laboratory material, rather than a specification of the SM4 DFA model. Accessed 19 November 2026.\\
+\url{https://github.com/morchidy/Hardware-Security-Labs}
+\item NewAE Technology documentation, \emph{CW1173: ChipWhisperer-Lite Board}, source file \texttt{naecw1173\_cwlite.rst}, preserved in the \texttt{marc-invalid/chipwhisperer-marc} GitHub fork, branch \texttt{master}. Historical hardware and setup reference; software examples may differ from the current ChipWhisperer API. Accessed 19 November 2026.\\
+\url{https://github.com/marc-invalid/chipwhisperer-marc/blob/master/doc/sphinx/naecw1173_cwlite.rst}
+\item NewAE Technology, \emph{Scope API}, glitch configuration, external triggering and pulse parameters. Accessed 19 November 2026.\\
+\url{https://chipwhisperer.readthedocs.io/en/latest/scope-api.html}
+\item NewAE Technology, \emph{CW1173 ChipWhisperer-Lite}, hardware and Glitch-port documentation. Accessed 19 November 2026.\\
+\url{https://chipwhisperer.readthedocs.io/en/latest/Capture/ChipWhisperer-Lite.html}
+\item NewAE Technology, \emph{Should I Use glitch\_hp or glitch\_lp?}, voltage-glitch driver guidance. Accessed 19 November 2026.\\
+\url{https://chipwhisperer.readthedocs.io/en/latest/cw_tips_tricks/basics/glitch_hp_vs_lp.html}
+\item NewAE Technology, \emph{ChipWhisperer Fault201 --- Lab 1\_3A: DFA Attack Against Final MixColumns}, Jupyter course notebook. Software-only simulation of the Piret--Quisquater single-byte fault before the last AES MixColumns, recovering the round key from the MixColumns differential; informs the single-byte DFA model adapted here to SM4. Accessed 20 November 2026.\\
+\url{https://github.com/newaetech/chipwhisperer-jupyter/blob/main/courses/fault201/Lab%201_3A%20-%20DFA%20Attack%20Against%20Final%20MixColumns.ipynb}
+\item NewAE Technology, \emph{ChipWhisperer Fault201 --- Lab 1\_3B: DFA Attack on AES}, Jupyter course notebook. Hardware clock-glitch DFA on an AES target (CW-Lite ARM / STM32) using the \texttt{phoenixAES} solver (Dusart, Letourneux and Vivolo, 2002); its CW-Lite ARM clock-glitch parameters (width, offset and \texttt{repeat}) guided the physical glitch regime used for the SM4 target in this work. Accessed 20 November 2026.\\
+\url{https://github.com/newaetech/chipwhisperer-jupyter/blob/main/courses/fault201/Lab%201_3B%20-%20DFA%20Attack%20on%20AES.ipynb}
 \end{enumerate}
-\note{The SM4 DFA chapter uses a deliberately strong fault assumption: known XOR magnitude at a specified S-box input. Experimental fault injection must establish whether that assumption is justified. Full recovery requires additional observations from earlier rounds; no full physical recovery of all four SM4 final round keys is claimed here.}
+\note{The SM4 DFA isolates one faulted byte per round. Two fault models are supported: a controlled input-word byte fault, where the mask is observable from copied-word output differences, and an instruction-skip / stuck-at S-box fault, where one S-box output byte is forced to \hex{00} or \hex{FF}. On the project's CW-Lite / STM32F303 target, clock glitching (CW-Lite ARM regime) produced stuck-at faults; the four tail subkeys and the full SM4 master key were recovered from physical faulty ciphertexts and verified by re-encryption.}

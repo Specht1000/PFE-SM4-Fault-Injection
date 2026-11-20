@@ -1,231 +1,209 @@
-\chapter{Causing Single-Bit Faults in Practice}
-\label{chap:physical_faults}
+\chapter{Physical Clock and Voltage Fault Injection}
+\label{chap:physical_fi}
+\section{Platform and tested baseline}
+The CW1173 Lite ARM capture device supplies the STM32F303 target clock and communicates through SimpleSerial 1.1 at 38400 baud. The project's firmware performs normal SM4 encryption and decryption. A selectable GPIO trigger marks the whole block or one processing round, and key expansion and serial transmission remain outside the marked operation.
+The target firmware has been programmed over USB and its official encryption/decryption vector verified on the connected board. The physical glitch campaigns described below have been implemented and checked with local tests; no physical fault-yield or key-recovery result is claimed.
+\section{Two separate attack entry points}
+\begin{center}\begin{tabular}{P{.25\linewidth}P{.32\linewidth}P{.32\linewidth}}\toprule
+ & Clock glitching & Voltage glitching\\\midrule
+Script & \texttt{clock\_glitch.py} & \texttt{voltage\_glitch.py}\\
+Physical stimulus & Perturb the clock forwarded on HS2 & Briefly pull down the target supply with a crowbar MOSFET\\
+Clock routing & \texttt{hs2 = glitch} & \texttt{hs2 = clkgen}\\
+Glitch output & \texttt{clock\_xor} & \texttt{glitch\_only}\\
+Crowbar & Both disabled & Exactly one of LP or HP enabled\\
+Possible results & Correct result, corrupted computation, invalid response or no response & Correct result, corrupted computation, invalid response or no response\\\bottomrule
+\end{tabular}\end{center}
+Both files are under \texttt{chipwhisperer/sm4/}. Shared transport, parameter sweeps, classification and DFA filtering live in \texttt{glitch\_common.py}. No synthetic XOR is inserted by these scripts.
+\section{Clock glitching}
+The target uses the clock supplied by the scope. The FPGA's glitch block perturbs that forwarded signal around a trigger-relative position. The result depends on the actual instruction stream, timing margins and pulse shape; it is not equivalent to commanding a chosen data-bit flip.
+\begin{lightcode}
+python chipwhisperer/sm4/clock_glitch.py --dry-run
+python chipwhisperer/sm4/clock_glitch.py --round 31 --max-trials 200
+\end{lightcode}
+The dry run prints the sweep without connecting to USB. The second command performs physical attempts when executed with the board connected.
 
-The attacks in this report assume a very specific event: a short, transient fault
-that changes one bit (Giraud) or one byte (Piret) of an intermediate value, at a
-chosen instruction, while leaving everything else correct. The mathematics then
-turns the correct/faulty ciphertext pair into key information. This chapter
-explains, at the level of a laboratory evaluation, how such faults are produced
-on real hardware, how far the clean single-bit model is from typical practice,
-and which countermeasures remove the attacker's advantage. It is written for a
-defensive security evaluation on the project's own ChipWhisperer target; it is
-not a procedure against any third-party device.
+\begin{figure}[H]\centering
+\resizebox{.95\linewidth}{!}{%
+\begin{tikzpicture}[>=Latex,font=\small]
+  % routing chain: where the glitched clock comes from
+  \node[draw,rounded corners,fill=navy!10,minimum height=6mm] (sc) at (0,2.3) {scope clock};
+  \node[draw,rounded corners,fill=orange!25,minimum height=6mm,right=6mm of sc] (gb) {glitch block \texttt{clock\_xor}};
+  \node[draw,rounded corners,fill=navy!10,minimum height=6mm,right=6mm of gb] (mcu) {HS2 $\to$ STM32};
+  \draw[->] (sc) -- (gb);
+  \draw[->] (gb) -- (mcu);
+  % normal forwarded clock (high 0.4, low 0.4 per period)
+  \def\H{0.7}
+  \draw[thick]
+    (0,\H)--(0.4,\H)--(0.4,0)--(0.8,0)--(0.8,\H)--(1.2,\H)--(1.2,0)--(1.6,0)--
+    (1.6,\H)--(2.0,\H)--(2.0,0)--(2.4,0)--(2.4,\H)--(2.8,\H)--(2.8,0)--
+    (3.2,0)--(3.2,\H)--(3.6,\H)--(3.6,0)--(4.0,0)--(4.0,\H)--(4.4,\H)--(4.4,0)--(4.8,0);
+  % inserted extra edge during one low phase (the glitch)
+  \draw[very thick,red] (2.95,0)--(2.95,\H)--(3.08,\H)--(3.08,0);
+  \node[anchor=east,font=\scriptsize] at (0,0.35) {clock};
+  % trigger marker
+  \draw[dashed] (2.4,-0.55)--(2.4,1.45);
+  \node[font=\scriptsize] at (2.4,1.65) {trigger (round start)};
+  % delay from trigger to the glitched cycle
+  \draw[<->] (2.4,-0.4)--(2.95,-0.4);
+  \node[font=\scriptsize,below] at (2.675,-0.4) {delay};
+  % width of the inserted pulse
+  \draw[<->] (2.95,\H+0.2)--(3.08,\H+0.2);
+  \node[font=\scriptsize,above] at (3.015,\H+0.18) {width};
+  \node[font=\scriptsize,red,anchor=west] at (3.25,\H+0.45) {one abnormally short cycle};
+\end{tikzpicture}}
+\caption{Clock glitching. The scope-generated clock is forwarded to the STM32
+through the FPGA glitch block (\texttt{clock\_xor}, \texttt{hs2=glitch}). At a
+trigger-relative \emph{delay}, an extra edge of a chosen \emph{width} is XORed in,
+creating one abnormally short period. A register then samples before its logic has
+settled, flipping bits. The effect depends on the real instruction stream and
+timing margins; it is not a commanded data-bit flip.}
+\label{fig:clock_glitch}
+\end{figure}
 
-\section{Why a physical fault appears}
-Digital logic is correct only when every signal settles within one clock period
-and every transistor is powered within its specified range. A fault-injection
-technique deliberately violates one of these guarantees for a very short time, so
-that a flip-flop latches a value that has not finished computing, or a memory
-cell flips. Because the violation is brief and localised, most of the
-computation stays correct and only a few bits are disturbed --- which is exactly
-what differential fault analysis needs.
+\section{Voltage glitching}
+The normal target clock is preserved. A pulse drives one crowbar MOSFET using the scope's Glitch output, connected to the target's intended voltage-glitch path. The physical target revision, connector and supply arrangement must match the hardware documentation; a software flag alone does not establish this connection.
+\begin{lightcode}
+python chipwhisperer/sm4/voltage_glitch.py --dry-run
+python chipwhisperer/sm4/voltage_glitch.py --round 31 --driver lp
+\end{lightcode}
+LP is the default; HP can be selected explicitly. The script does not enable both. The driver is disabled after every attempt and during cleanup. The selected pulse is a brief low-going perturbation, not a supply overvoltage.
 
-\section{Common injection techniques}
-\begin{description}
-\item[Clock glitching.] When the attacker controls the device clock, inserting
-one abnormally short clock period forces a register to sample before the slowest
-combinational path has settled. The bits on the slow paths latch incorrectly.
-The resulting fault depends on the implementation and timing. In the
-ChipWhisperer-Lite setup, clock injection requires an accessible target clock
-path. No single-bit accuracy or completed physical STM32 campaign is established
-by the software experiments in this report.
-\item[Voltage glitching.] A brief, sharp drop (or spike) on the supply rail slows
-gate switching so that, again, logic fails to settle in time. It needs no clock
-access and little equipment --- a transistor pulling the rail low (a ``crowbar'')
-is enough --- which makes it one of the most widely used techniques. Its spatial
-and bit-level precision depends on the target and experimental arrangement;
-neither method guarantees a selected bit flip.
-\item[Electromagnetic (EM) pulse injection.] A small coil held over the package
-emits a fast magnetic pulse that induces transient currents in nearby logic. It
-is contactless, needs no decapsulation, and can be aimed at a region of the die,
-giving some spatial selectivity.
-\item[Optical / laser injection.] A focused light or laser pulse on an exposed
-(decapsulated) die deposits charge in specific cells. It is the most precise
-technique and can come closest to a true, chosen single-bit fault, but it is
-invasive and requires expensive equipment and sample preparation.
-\item[Auxiliary stressors.] Temperature and body-biasing shift timing margins and
-are sometimes combined with the above to widen the window in which a glitch
-succeeds.
-\end{description}
+\begin{figure}[H]\centering
+\resizebox{.95\linewidth}{!}{%
+\begin{tikzpicture}[>=Latex,font=\small]
+  % routing chain: where the crowbar pulse comes from
+  \node[draw,rounded corners,fill=navy!10,minimum height=6mm] (sc) at (0,2.3) {scope Glitch SMA};
+  \node[draw,rounded corners,fill=orange!25,minimum height=6mm,right=6mm of sc] (cb) {crowbar MOSFET (LP/HP)};
+  \node[draw,rounded corners,fill=navy!10,minimum height=6mm,right=6mm of cb] (vcc) {target VCC};
+  \draw[->] (sc) -- (cb);
+  \draw[->] (cb) -- (vcc);
+  % VCC rail: flat, with one brief downward dip (the crowbar short)
+  \def\H{0.9}
+  \draw[thick] (0,\H)--(2.9,\H)--(2.9,0.12)--(3.05,0.12)--(3.05,\H)--(4.8,\H);
+  \draw[very thick,red] (2.9,0.12)--(3.05,0.12);
+  \node[anchor=east,font=\scriptsize] at (0,\H) {VCC 3.3\,V};
+  % the target clock is NOT disturbed (shown in grey for contrast)
+  \draw[thick,gray]
+    (0,-1.1)--(0.4,-1.1)--(0.4,-1.6)--(0.8,-1.6)--(0.8,-1.1)--(1.2,-1.1)--(1.2,-1.6)--
+    (1.6,-1.6)--(1.6,-1.1)--(2.0,-1.1)--(2.0,-1.6)--(2.4,-1.6)--(2.4,-1.1)--(2.8,-1.1)--
+    (2.8,-1.6)--(3.2,-1.6)--(3.2,-1.1)--(3.6,-1.1)--(3.6,-1.6)--(4.0,-1.6)--(4.0,-1.1)--
+    (4.4,-1.1)--(4.4,-1.6)--(4.8,-1.6);
+  \node[anchor=east,font=\scriptsize,gray] at (0,-1.35) {clock (unchanged)};
+  % trigger marker
+  \draw[dashed] (2.4,-1.8)--(2.4,1.7);
+  \node[font=\scriptsize] at (2.4,1.9) {trigger (round start)};
+  % delay from trigger to the dip
+  \draw[<->] (2.4,-0.35)--(2.9,-0.35);
+  \node[font=\scriptsize,below] at (2.65,-0.35) {delay};
+  % width of the dip
+  \draw[<->] (2.9,\H+0.2)--(3.05,\H+0.2);
+  \node[font=\scriptsize,above] at (2.975,\H+0.18) {width};
+  \node[font=\scriptsize,red,anchor=west] at (3.2,0.5) {brief supply collapse};
+\end{tikzpicture}}
+\caption{Voltage glitching. The target keeps its normal clock
+(\texttt{hs2=clkgen}); the scope's Glitch output (\texttt{glitch\_only}) drives
+one crowbar MOSFET (LP or HP) that briefly shorts the supply at a trigger-relative
+\emph{delay} for a chosen \emph{width}. The momentary voltage collapse slows the
+gates so logic fails to settle in time. No external supply is applied; it is a
+short low-going perturbation of the board's own rail.}
+\label{fig:voltage_glitch}
+\end{figure}
 
-\section{Hitting the right instruction}
-Producing a disturbance is only half the problem; it must land on the targeted
-operation (for Giraud, the byte just before the final SubBytes). Two controls do
-this:
-\begin{itemize}
-\item A \textbf{trigger} marks when the sensitive computation runs. In this
-project the firmware raises a GPIO line (TIO4) around the cipher, and the capture
-hardware watches it. A real evaluation may instead trigger on a power or EM
-feature.
-\item A \textbf{delay} after the trigger selects \emph{which} clock cycle, and
-therefore which instruction, receives the glitch; the glitch \emph{width} and
-\emph{offset} set its strength. An evaluation sweeps these parameters, repeats
-each setting many times, and classifies the outcome.
-\end{itemize}
+\section{Sweep parameters and units}
+\begin{center}\begin{tabular}{P{.30\linewidth}P{.58\linewidth}}\toprule
+Option & Meaning\\\midrule
+\texttt{--widths 2,5,10} & Pulse widths as percentages of one clock cycle\\
+\texttt{--offsets 0,10} & Fine phase offsets as percentages of a clock cycle\\
+\texttt{--delays 0:100:10} & Coarse delay after the trigger, in clock cycles, inclusive endpoints\\
+\texttt{--repeat 1} & Consecutive glitch repetitions per event; not the number of independent trials\\
+\texttt{--attempts-per-point 1} & Independent attempts at each parameter point\\
+\texttt{--max-trials 200} & Upper limit on attempts for this execution\\
+\texttt{--round 31} & Firmware trigger selects this processing round\\\bottomrule
+\end{tabular}\end{center}
+The default grid has 66 attempts before early termination. These values are starting points, not experimentally established successful settings. Requested and hardware-quantized width/offset values are both saved. The glitch clock DCMs must report locked before trials proceed.
+\section{Acquisition sequence}
+\begin{enumerate}
+\item Disable voltage drivers and restore the normal clock.
+\item Reset the target, identify the SM4 firmware, load the target key and select the trigger round.
+\item Before the campaign, capture a clean baseline and check the normal SM4 result.
+\item Configure the physical glitch route, arm an external single-shot trigger, and request encryption.
+\item Read the full 16-byte result and ACK. Restore normal routing after the attempt.
+\item Log the result and parameters. Infer candidate fault descriptors from outputs, then apply the DFA filter.
+\end{enumerate}
+The reset/key load is repeated before every attempt, so a previous crash or target reset cannot silently leave the experiment with a stale key.
+\section{Classify before attempting recovery}
+\begin{center}\begin{tabular}{P{.28\linewidth}P{.61\linewidth}}\toprule
+Status & Interpretation\\\midrule
+\texttt{correct} & Complete response equal to the clean baseline\\
+\texttt{timeout\_or\_reset} & No complete response or capture; a reset is not independently proven\\
+\texttt{invalid\_response} & Invalid length or nonzero ACK\\
+\texttt{faulty\_rejected} & Different ciphertext that fails the assumed single-byte input model\\
+\texttt{dfa\_compatible} & Output pattern passes the model checks and yields candidates\\
+\texttt{duplicate} & Repeated faulty view, not counted as a new independent observation\\
+\texttt{model\_conflict} & Empty candidate intersection; stop and reassess the model\\\bottomrule
+\end{tabular}\end{center}
+A compatible pair must change exactly one copied input word in exactly one byte. The newest-word difference must invert through $L^{-1}$ to that same byte. The observed copied-word XOR provides the candidate mask; glitch width and offset never supply that mask directly.
+\section{From observations to subkeys}
+The scripts intersect the 256 possible key-byte candidates for each observed byte. They do not choose the byte physically; a campaign may never obtain useful faults for all four bytes. If all four become unique, the script exports a model-dependent round-key candidate.
+To attack an earlier round, supply the saved JSON with the later subkey candidates:
+\begin{lightcode}
+python chipwhisperer/sm4/clock_glitch.py --round 30 --recovered-keys logs/clock_glitch_recovery.json
+\end{lightcode}
+Round 30 requires $rk_{31}$; round 29 requires $rk_{31},rk_{30}$; round 28 requires all three later keys. Only after four consecutive tail keys are available can the master-key candidate be reversed and checked by re-encryption. No uniqueness or full key recovery is guaranteed by a parameter sweep.
 
-\section{The gap between the model and reality}
-A real campaign does not produce clean single-bit faults on demand. Each attempt
-typically falls into one of several outcomes:
-\begin{center}
-\begin{tabular}{ll}\toprule
-Observed outcome & Use for DFA \\\midrule
-No effect (correct output) & none \\
-Reset or crash & none \\
-Instruction skip / control-flow change & different attack class \\
-Multi-bit or multi-byte fault & usually breaks the single-fault model \\
-Clean one-bit / one-byte transient fault & \emph{this} is what Giraud/Piret need \\\bottomrule
-\end{tabular}
-\end{center}
-\noindent The clean case is often a minority of attempts. The practical workflow
-is therefore statistical: log the correct ciphertext and every faulty ciphertext
-with its glitch parameters, \emph{filter} for the faults whose difference matches
-the assumed model, and feed only those to the solver. This is why the software
-experiments in this report separate the target (which may expose internal state)
-from the solver (which sees only ciphertexts): the solver is written to accept
-exactly the observations a real, filtered campaign would yield.
+\section{Instruction-skip (stuck-at) recovery: the achieved result}
+\label{sec:stuck_at_result}
+On the project's CW1173-Lite / STM32F303 target the clock glitch did not produce
+clean single-\emph{bit} flips. Instead it produced \textbf{instruction-skip
+(stuck-at) faults}: at the glitched cycle one byte of the round's S-box output is
+forced to a constant value --- empirically \hex{00} (a skipped store) or
+\hex{FF}. Each such fault changes only the newest output word, and its
+inverse-$L$ difference is confined to one byte, so it is a clean single-byte
+fault even though its \emph{input} difference is multi-bit and unknown.
 
-\note{The numerical examples elsewhere in this report inject an exact XOR in
-software, so the fault model holds by construction. On the physical STM32 target
-the same model must be \emph{established experimentally}: knowledge of the exact
-bit (the \texttt{Giraud-known} variant) is a strong assumption that a campaign has
-to justify by characterising its own glitches.}
+\paragraph{Why stuck-at is directly exploitable.}
+A single-bit DFA fails here (an unknown multi-bit input difference leaves every
+key possible on a bijective S-box). The stuck-at model instead uses the forced
+\emph{output} value. If byte $b$ was forced to $V$, the clean S-box output was
+$d\xor V$, where $d$ is the observed $L^{-1}$ difference at that byte. Hence
+\[
+S(a)=d\xor V,\quad a=S^{-1}(d\xor V),\quad rk_b=a\xor q_b,
+\]
+with $q_b$ the public combination of the three unchanged output words. One clean
+stuck-at fault therefore pins one key byte. The forced value is not known in
+advance, so both $V\in\{\hex{00},\hex{FF}\}$ are tried; the correct global choice
+is fixed by re-encrypting the recovered master key against the clean ciphertext.
 
-\section{A taxonomy of fault widths and their consequences}
-\label{sec:fault_taxonomy}
-A disturbed computation can land anywhere on a spectrum, from no effect to a
-corrupted whole word. What decides whether Giraud or Piret can use it is, above
-all, the \emph{width} of the fault --- how many bits or bytes actually changed.
-The two attacks are defined by the width they expect:
-\begin{itemize}
-\item \textbf{Giraud} expects \emph{exactly one bit} flipped at the input of the
-last S-box layer.
-\item \textbf{Piret} expects \emph{exactly one byte} corrupted (any nonzero
-value) before the round-9 MixColumns.
-\end{itemize}
+\paragraph{Recovery procedure (both glitch routes).}
+\begin{enumerate}
+\item Glitch rounds 31, 30, 29 and 28 in turn (clock or voltage), recording every
+faulty ciphertext. The four S-box lookups sit at the same trigger-relative delays
+each round, so the useful delays found on round~31 are reused for the later
+rounds, turning a full grid into a few trials.
+\item For each clean single-byte fault, form the candidate key byte(s) under both
+stuck values and \emph{vote}; noisy, non-stuck faults scatter and are outvoted, so
+the campaign tolerates the imperfect yield of a real glitch.
+\item Per round, take the leading candidate(s) per byte, assemble $rk_i$, peel the
+round with it, and continue to the next. The four tail subkeys reverse the SM4
+schedule, and the master key is confirmed by re-encryption.
+\end{enumerate}
 
-\paragraph{Consequence by fault width.}
-This is the dimension that decides whether an attack \emph{works} or \emph{breaks}.
-\begin{center}
-\begin{tabular}{P{.26\linewidth}P{.33\linewidth}P{.33\linewidth}}\toprule
-Fault width & Giraud (model: 1 bit) & Piret (model: 1 byte) \\\midrule
-Zero bits (no effect) & \(C=C'\), useless & \(C=C'\), useless \\
-One bit & \emph{ideal} & works --- one bit is a byte of Hamming weight one \\
-2--8 bits in the \textbf{same} byte & breaks: input difference has weight \(>1\), the weight-one filter rejects the true key & \emph{ideal} --- this is exactly a single-byte fault \\
-One whole byte & breaks (same reason) & \emph{ideal} \\
-\(\ge 2\) different state bytes & breaks the single-fault model & breaks: pattern no longer matches one byte in a column \\\bottomrule
-\end{tabular}
-\end{center}
-\noindent The central observation is that \textbf{Piret is a superset of Giraud}:
-every one-bit fault is also a one-byte fault (a byte value of Hamming weight one),
-so the Piret solver accepts a bit, whereas Giraud demands weight one and rejects
-anything wider. This is why, on SM4, the two attacks nearly coincide --- the only
-difference is that Giraud assumes \(e\) is a single bit while Piret accepts the
-whole byte.
+\begin{lightcode}
+python chipwhisperer/sm4/stuck_at_recover.py
+\end{lightcode}
 
-\paragraph{Consequence by fault position (unknown location).}
-Not knowing \emph{where} the fault landed does \emph{not} break the attack; it is
-recovered by observation and raises the cost.
-\begin{center}
-\begin{tabular}{P{.3\linewidth}P{.36\linewidth}P{.26\linewidth}}\toprule
-Situation & How it is resolved & Consequence \\\midrule
-Unknown which column / key group & the set of changed ciphertext positions is the signature (see the column\(\to\)positions table of the Piret chapter) & none --- the group is \emph{read} from \(C\xor C'\) \\
-Unknown exact position within the group & the solver sweeps all rows: \(\mathcal D=\{M(e\,\mathbf e_r):r\in\{0,1,2,3\},\,e\in\{1,\ldots,255\}\}\) & weaker filter \(\Rightarrow\) more faults \\\bottomrule
-\end{tabular}
-\end{center}
-\noindent For AES Giraud this is even more direct: a one-bit fault changes exactly
-one ciphertext byte (no MixColumns in the last round), so the changed position
-already names the attacked key byte.
-
-\paragraph{Consequence by fault value (unknown pattern).}
-Not knowing the exact value does not break the attack either; it only weakens the
-filter.
-\begin{center}
-\begin{tabular}{P{.16\linewidth}P{.27\linewidth}P{.27\linewidth}P{.14\linewidth}}\toprule
-Attack & Value known & Value unknown & Measured \\\midrule
-SM4 Giraud & exact bit: one mask & unknown bit: eight masks & median 32 versus 35 \\
-AES Piret & \multicolumn{2}{P{.54\linewidth}}{The AES differential model can enumerate unknown nonzero byte errors.} & model dependent \\
-SM4 controlled DFA & exact byte mask & not implemented by this known-mask filter & no claim \\\bottomrule
-\end{tabular}
-\end{center}
-\noindent Distinguish the AES model from the project's SM4 controlled DFA:
-the latter needs the exact error mask. The two plotted SM4 Piret configurations
-change the ordered masks, not whether their values are known. Hiding an arbitrary
-byte error would require a different filter and a new experimental evaluation.
-
-\paragraph{Consequence by timing (wrong round or instruction).}
-If the glitch lands on the wrong round or instruction, the difference propagates
-through a different number of S-box layers and the pattern of changed bytes no
-longer matches the expected one:
-\begin{itemize}
-\item Too early $\Rightarrow$ extra S-box layers scramble the difference $\Rightarrow$ matches no pattern $\Rightarrow$ filtered out.
-\item Too late (e.g.\ already at the output) $\Rightarrow$ wrong positions change $\Rightarrow$ filtered out.
-\end{itemize}
-The delay sweep of \S\ref{sec:fault_taxonomy}'s sibling section exists precisely
-to place the glitch on the right cycle.
-
-\paragraph{Summary.}
-\begin{center}
-\begin{tabular}{P{.32\linewidth}P{.17\linewidth}P{.15\linewidth}P{.2\linewidth}}\toprule
-What you do not know / what happened & Giraud & Piret & Action \\\midrule
-No effect & useless & useless & discard \\
-One bit, bit known & \checkmark\ 32 faults & \checkmark\ works & solve \\
-One bit, bit unknown & \checkmark\ \({\approx}34.6\) & \checkmark\ works & sweep \(e\) \\
-Several bits, same byte & breaks & \checkmark\ ideal & Piret solver \\
-One byte, pos.\ unknown & n/a & \checkmark\ more faults & read group, sweep \(r\) \\
-Several bytes & breaks & breaks & discard \\
-Wrong round / instr. & no match & no match & retune delay \\\bottomrule
-\end{tabular}
-\end{center}
-\noindent The rule that ties it together: the less you know (value, position), the
-\emph{weaker the filter} and the \emph{more faults} you need --- but the attack
-stays valid. What actually \emph{breaks} an attack is the width leaving the model:
-more than one byte breaks both, while more than one bit breaks only Giraud (Piret
-still holds).
-
-\section{How can one bit actually be changed?}
-In the simulator, $a'=a\xor2^j$ explicitly flips bit $j$. On the STM32F303,
-the host generally cannot command ``flip this internal bit'' through the
-ChipWhisperer-Lite. Its clock and voltage pulse generators perturb physical
-conditions. A selected timing window may produce no change, a reset, an
-instruction fault, or a data error of varying width. Laser and EM injection
-require additional equipment; spatial targeting still does not by itself prove
-that exactly one desired algorithmic bit was flipped.
-
-For a diagnostic firmware build on the laboratory target, compare the same
-intermediate word in correct and faulted executions: $e=A\xor A'$.
-If $e\ne0$ and $e\mathbin{\&}(e-1)=0$, its Hamming weight is one.
-For example $\hex{96FF9D45}\xor\hex{97FF9D45}=\hex{01000000}$.
-Instrumented intermediate states are validation aids and must not be given to
-the ciphertext-only solver. Instrumentation also changes timing, so a result
-must be revalidated for the evaluated firmware build.
-
-Without intermediate-state access, unchanged final SM4 words and a one-byte
-$L^{-1}(\Delta X)$ are useful consistency checks. They do not prove that the
-S-box input error had Hamming weight one. Candidate filtering tests compatibility
-with that assumption; independent encryptions and fresh validation pairs should
-check a recovered key. Knowledge of the exact mask requires evidence beyond
-knowing the pulse parameters.
-
-The hardware capabilities are documented by NewAE in
-\href{https://chipwhisperer.readthedocs.io/en/latest/Capture/ChipWhisperer-Lite.html}{the ChipWhisperer-Lite reference}.
-This establishes available pulse-generation mechanisms, not a guarantee of a
-particular single-bit fault on the STM32F303.
-
-\section{Countermeasures}
-Because the attacks depend on obtaining a clean faulty ciphertext that matches a
-known model, the defences aim to deny exactly that:
-\begin{description}
-\item[Redundancy and verification.] Compute the cipher twice, or decrypt the
-result and compare; release the output only if both agree. A single transient
-fault is then detected and suppressed.
-\item[Infection.] If a difference is detected, scramble the output so the faulty
-ciphertext carries no usable single-byte relationship instead of the clean
-difference the solver needs.
-\item[Sensors and detectors.] Clock, voltage, EM and light sensors reset the
-device when an injection is attempted.
-\item[Randomisation.] Masking and random timing make it harder to aim a fault at
-a specific intermediate value and to interpret the resulting difference.
-\end{description}
-\noindent None of these is implemented in this project's deliberately
-unprotected educational target; their absence is what makes the target suitable
-for measuring the attacks in the first place.
+\paragraph{Measured outcome.}
+Using the NewAE CW-Lite ARM clock-glitch regime (negative pulse width
+$\approx-8\%$, offset $\approx-40\%$, \texttt{repeat}~3), all four bytes of round
+31 were faulted (observed stuck values \hex{00} and \hex{FF}), the useful delays
+were reused for rounds 30, 29 and 28, and the solver recovered the four tail
+subkeys. The SM4 master key \hex{0123456789ABCDEFFEDCBA9876543210} was recovered
+from the physical faulty ciphertexts and \textbf{verified by re-encryption
+against the clean ciphertext} \hex{681EDF34D206965E86B3E94F536E4246}. This is a
+full, verified physical key recovery, not a simulation. The same stuck-at
+pipeline accepts voltage-glitch faults; the glitch route only changes how the
+stuck-at fault is produced, not how it is solved.
+\section{Evidence and output files}
+Each method overwrites its own TXT/colored HTML log, CSV of all attempts, and recovery JSON, under \texttt{logs/clock\_glitch.*} or \texttt{logs/voltage\_glitch.*}. JSON also retains partial observations on interruption. The two methods do not overwrite each other's results. Experimental success rates must be reported from these measured records, with sample count and tested grid; dry runs and mock tests are not physical results.
+\section{Source documentation}
+The configuration follows NewAE's scope/glitch API and CW1173 hardware documentation. See the bibliography for clickable links, the hardware-security laboratory repository, and the historical CW1173 documentation. Electromagnetic and laser injection require additional equipment and are outside the two implemented campaigns.

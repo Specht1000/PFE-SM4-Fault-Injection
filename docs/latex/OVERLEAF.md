@@ -1,17 +1,14 @@
-# LaTeX report
+# Main SM4 report
 
-The report contains algorithm theory, mathematical attack descriptions, fault models and key recovery. Implementation explanations, function references and source listings have been removed.
+Upload this directory, preserving chapters/, parts/, frontmatter/ and figures/.
+Select main.tex as the main document. The report explains SM4 and physical FI;
+the final chapter retains a cipher comparison for context.
 
-## Local PDF
+For local compilation with Tectonic, run from the repository root:
+~~~powershell
+tectonic --outdir .build/references-update docs/latex/main.tex
+~~~
 
-Run from the repository root:
-
-```powershell
-python build_pdf.py
-```
-
-Output: `docs/AES_SM4_DFA.pdf`. The first run downloads a portable compiler and LaTeX packages.
-
-## Overleaf
-
-Keep the folder structure and select `main.tex` as the main document. `full_report.tex` and `part_01.tex` build the same report. Edit the theory in `chapters/01_purpose.tex` through `chapters/08_comparison.tex`.
+Create the output directory first. After a successful build, publish main.pdf
+as docs/AES_SM4_DFA.pdf, whose established filename is retained for existing links.
+The two physical scripts are documented in chapters/09_physical_faults.tex.

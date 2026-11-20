@@ -15,11 +15,11 @@ import sm4
 class SessionLog:
     """Overwrite terminal-style HTML and TXT logs for each hardware session."""
 
-    def __init__(self):
+    def __init__(self, name="chipwhisperer_sm4"):
         directory = ROOT / "logs"
         directory.mkdir(exist_ok=True)
-        self.text = (directory / "chipwhisperer_sm4.txt").open("w", encoding="utf-8")
-        self.page = (directory / "chipwhisperer_sm4.html").open("w", encoding="utf-8")
+        self.text = (directory / (name + ".txt")).open("w", encoding="utf-8")
+        self.page = (directory / (name + ".html")).open("w", encoding="utf-8")
         self.page.write('<!doctype html><html lang="en"><meta charset="utf-8"><title>ChipWhisperer SM4</title><style>body{background:#0b0f14;color:#e6edf3;margin:24px}pre{font:14px/1.5 Consolas,monospace}.green{color:#78d994}.red{color:#ff7373}.cyan{color:#4fd1c5}</style><body><pre>')
 
     def line(self, message, color="cyan"):

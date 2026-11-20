@@ -135,6 +135,196 @@ def sm4_byte_candidates(correct, faulty, byte, mask):
     return key_candidates, inputs, delta_b
 
 
+SINGLE_BIT_MASKS = (0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80)
+
+
+def sm4_sbox_input_giraud_candidates(correct, faulty, byte):
+    """Giraud-style filter for an S-box-INPUT fault assumed to flip ONE bit.
+
+    This models a glitch that hits the round's S-box input directly (not a
+    pass-through input word): only the newest output word changes, the
+    pass-through words (hence q) are unchanged, so the input difference e is NOT
+    directly observable. Assuming a single-bit fault of unknown position, a key
+    survives if SOME one-bit e explains the observed S-box output difference.
+
+    A multi-bit or multi-byte S-box fault yields no surviving key and is raised
+    as off-model, exactly as it should be. Returns (key_candidates, inputs,
+    delta_b), matching sm4_byte_candidates' shape.
+    """
+    if len(correct) != 16 or len(faulty) != 16 or not 0 <= byte < 4:
+        raise ValueError("Invalid SM4 output or byte index.")
+
+    c = struct.unpack(">4I", correct)
+    f = struct.unpack(">4I", faulty)
+
+    # An S-box-input fault leaves the three pass-through words untouched.
+    if c[1:] != f[1:]:
+        raise ValueError("S-box-input model requires the pass-through words unchanged.")
+
+    word_diff = c[0] ^ f[0]
+
+    if word_diff == 0:
+        raise ValueError("No output difference to analyse.")
+
+    shift = 24 - 8 * byte
+    delta_b = inverse_linear(word_diff)
+
+    # The S-box output difference must be confined to the single faulted byte.
+    if not delta_b or delta_b & ~(255 << shift):
+        raise ValueError("Difference does not match a single-byte S-box-input fault.")
+
+    delta = (delta_b >> shift) & 255
+    # q is public and unchanged; the S-box input byte is a = q ^ rk_byte.
+    q = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+
+    key_candidates = set()
+    inputs = set()
+
+    for candidate_key in range(256):
+        a = q ^ candidate_key
+
+        # Keep the key if any single-bit input flip reproduces the observed diff.
+        for one_bit in SINGLE_BIT_MASKS:
+            if sm4.SBOX[a] ^ sm4.SBOX[a ^ one_bit] == delta:
+                key_candidates.add(candidate_key)
+                inputs.add(a)
+                break
+
+    if not key_candidates:
+        raise ValueError("No key byte is consistent with a single-bit S-box-input fault.")
+
+    return key_candidates, inputs, delta_b
+
+
+_INV_SBOX = [0] * 256
+for _index in range(256):
+    _INV_SBOX[sm4.SBOX[_index]] = _index
+INV_SBOX = tuple(_INV_SBOX)
+
+
+def sm4_stuck_at_candidates(correct, faulty, byte, stuck_values=(0x00, 0xFF)):
+    """Key-byte candidates for an INSTRUCTION-SKIP / STUCK-AT S-box fault.
+
+    Many real glitches do not flip a bit; they force one S-box output byte to a
+    constant V (typically 0x00 from a skipped store, or 0xFF). Only the newest
+    output word changes, the pass-through words (hence q) are unchanged. If the
+    faulted byte was forced to V then the clean output is d ^ V, so the S-box
+    input is a = S^-1(d ^ V) and the key byte is a ^ q. One clean stuck-at fault
+    therefore pins the byte directly; trying both common stuck values keeps the
+    two hypotheses, which a later re-encryption check disambiguates.
+
+    Returns (key_candidates, delta_b).
+    """
+    if len(correct) != 16 or len(faulty) != 16 or not 0 <= byte < 4:
+        raise ValueError("Invalid SM4 output or byte index.")
+
+    c = struct.unpack(">4I", correct)
+    f = struct.unpack(">4I", faulty)
+
+    if c[1:] != f[1:]:
+        raise ValueError("Stuck-at model requires the pass-through words unchanged.")
+
+    word_diff = c[0] ^ f[0]
+
+    if word_diff == 0:
+        raise ValueError("No output difference to analyse.")
+
+    shift = 24 - 8 * byte
+    delta_b = inverse_linear(word_diff)
+
+    if not delta_b or delta_b & ~(255 << shift):
+        raise ValueError("Difference does not match a single-byte S-box fault.")
+
+    d = (delta_b >> shift) & 255
+    q = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+
+    key_candidates = set()
+
+    for stuck in stuck_values:
+        # Faulted byte forced to `stuck` => clean S-box output was d ^ stuck.
+        key_candidates.add(INV_SBOX[d ^ stuck] ^ q)
+
+    return key_candidates, delta_b
+
+
+def _stuck_byte_ballots(correct, faulty_by_round, number, keys, stuck_values):
+    """Per-byte vote tallies for one round, peeled with already-recovered keys.
+
+    Returns a list of four Counters (byte -> {key_byte: votes}). A clean stuck-at
+    fault votes for the true key byte under its stuck value; noisy or multi-byte
+    faults are ignored or scatter, so the true byte (and its 00/FF complement)
+    rise to the top. This never raises on noise, which is why it does not hang.
+    """
+    clean = peel_sm4(correct, number, keys)
+    c = struct.unpack(">4I", clean)
+    tally = [{}, {}, {}, {}]
+
+    for faulty in faulty_by_round.get(number, ()):
+        f = struct.unpack(">4I", peel_sm4(faulty, number, keys))
+
+        # Keep only clean single-byte S-box faults (pass-through words unchanged).
+        if c[1:] != f[1:] or c[0] == f[0]:
+            continue
+
+        delta_b = inverse_linear(c[0] ^ f[0])
+        nonzero = [index for index in range(4) if (delta_b >> (24 - 8 * index)) & 255]
+
+        if len(nonzero) != 1:
+            continue
+
+        byte = nonzero[0]
+        shift = 24 - 8 * byte
+        d = (delta_b >> shift) & 255
+        q = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+
+        for stuck in stuck_values:
+            candidate = INV_SBOX[d ^ stuck] ^ q
+            tally[byte][candidate] = tally[byte].get(candidate, 0) + 1
+
+    return tally
+
+
+def recover_stuck_at(plaintext, correct, faulty_by_round, stuck_values=(0x00, 0xFF), top=2):
+    """Recover the master key from STUCK-AT faults, verified by re-encryption.
+
+    faulty_by_round maps each of rounds 31..28 to a list of faulty ciphertexts.
+    Per round/byte the candidates are VOTED (so noisy, non-stuck faults cannot
+    derail or explode the search), and only the `top` most-voted values per byte
+    are kept - normally the true key and its 00/FF complement. A depth-first
+    search over rounds (peeling with already-chosen keys) tries the bounded
+    product and returns the master key that re-encrypts to the given ciphertext,
+    or None if the supplied faults cannot reproduce it (e.g. a byte never got a
+    clean fault at some round).
+    """
+    import itertools
+
+    def search(number, keys):
+        if number < 28:
+            master = reverse_sm4([keys[28], keys[29], keys[30], keys[31]])
+            return master if sm4.sm4_encrypt_block(plaintext, master) == correct else None
+
+        tally = _stuck_byte_ballots(correct, faulty_by_round, number, keys, stuck_values)
+        leaders = []
+
+        for byte in range(4):
+            if not tally[byte]:
+                return None  # this byte never got a clean fault at this round
+
+            ranked = sorted(tally[byte].items(), key=lambda item: item[1], reverse=True)
+            leaders.append([value for value, _count in ranked[:top]])
+
+        for combination in itertools.product(*leaders):
+            keys[number] = int.from_bytes(bytes(combination), "big")
+            found = search(number - 1, keys)
+            if found is not None:
+                return found
+
+        keys.pop(number, None)
+        return None
+
+    return search(31, {})
+
+
 def reverse_sm4(final_keys, observer=None):
     """Turn the four last round keys rk28..rk31 back into the 16-byte master key.
 

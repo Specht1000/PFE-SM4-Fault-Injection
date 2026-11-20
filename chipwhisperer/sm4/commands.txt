@@ -34,3 +34,16 @@ python chipwhisperer/sm4/client.py --trigger-round 31 --capture --samples 5000
 
 # 9. Local validation without USB hardware (native GCC required for C tests).
 python tools/test_chipwhisperer_sm4.py
+
+# 10. Inspect physical campaign grids without connecting to USB.
+python chipwhisperer/sm4/clock_glitch.py --dry-run
+python chipwhisperer/sm4/voltage_glitch.py --dry-run
+
+# 11. Apply physical clock glitches to the running SM4 target.
+python chipwhisperer/sm4/clock_glitch.py --round 31 --max-trials 200
+
+# 12. Apply physical voltage glitches (requires the documented Glitch/VCC connection).
+python chipwhisperer/sm4/voltage_glitch.py --round 31 --driver lp --max-trials 200
+
+# 13. Validate physical-campaign logic with mocks; no physical faults applied.
+python tools/test_sm4_glitch_campaigns.py

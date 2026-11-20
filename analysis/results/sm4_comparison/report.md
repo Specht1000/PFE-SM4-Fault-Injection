@@ -11,7 +11,7 @@ All four variants recover rk31, rk30, rk29 and rk28 using controlled faults at S
 | Giraud-known-bit | Same single-bit sequence | Exact selected bit |
 | Giraud-unknown-bit | Same single-bit sequence | One-bit property, not the exact bit |
 
-The SM4 variants are controlled DFA and a Giraud-inspired adaptation; they are not unchanged AES attacks. The default Piret sequence contains multi-bit masks, so its comparison with unknown-bit Giraud changes both observations and solver knowledge. The matched-bit control separates these effects.
+The SM4 variants are controlled DFA and a Giraud-inspired adaptation; their equations depend on the specified SM4 fault model. The default Piret sequence contains multi-bit masks, so its comparison with unknown-bit Giraud changes both observations and solver knowledge. The matched-bit control separates these effects.
 
 ## Measured results
 

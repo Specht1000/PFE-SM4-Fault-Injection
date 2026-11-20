@@ -74,6 +74,21 @@ physical glitch is applied by this firmware/client. This establishes a clean
 reference target for subsequent side-channel/FI work. It is an intentionally
 readable, table-based implementation, not a hardened cryptographic library.
 
+## Physical fault-injection campaigns
+
+Clock and voltage injection have separate entry points:
+
+~~~powershell
+python chipwhisperer/sm4/clock_glitch.py --dry-run
+python chipwhisperer/sm4/voltage_glitch.py --dry-run
+~~~
+
+See [PHYSICAL_FI.md](PHYSICAL_FI.md) for the actual acquisition commands, required
+connections, parameter units, trial classification and ciphertext-only DFA
+filtering. These campaign scripts apply physical perturbations when run without
+--dry-run; the normal client above still performs no fault injection. No physical
+glitch-yield or key-recovery result is claimed from their local/mock tests.
+
 ## Files
 
 | File | Purpose |
@@ -115,7 +130,9 @@ vector and 100 random encrypt/decrypt cases against src/sm4.py, check round-hook
 ordering, and exercise serial response/ACK handling with a mock target.
 
 The complete Cortex-M4 firmware was also built with Arm GCC 13.3.1 and upstream
-SDK commit 884412281b1c1749b871e16e563d3ff310affd68. USB programming, trigger timing
+SDK commit 884412281b1c1749b871e16e563d3ff310affd68. On 2026-11-19, the connected
+STM32F303 was programmed over USB, flash readback verification passed, and both
+the official encryption vector and on-target decryption passed. Trigger timing
 and power capture still require validation on the physical board.
 
 - [NewAE custom firmware guide](https://chipwhisperer.readthedocs.io/en/latest/custom-firmware.html)
@@ -124,3 +141,5 @@ and power capture still require validation on the physical board.
 - [SimpleSerial protocol](https://chipwhisperer.readthedocs.io/en/latest/simpleserial.html)
 - [Target Python API](https://chipwhisperer.readthedocs.io/en/latest/target-api.html)
 - [SM4 definition, including test vector](https://datatracker.ietf.org/doc/html/draft-crypto-sm4-00)
+- [Hardware-Security-Labs](https://github.com/morchidy/Hardware-Security-Labs): hands-on side-channel and clock-glitching exercises.
+- [Historical CW1173 hardware documentation](https://github.com/marc-invalid/chipwhisperer-marc/blob/master/doc/sphinx/naecw1173_cwlite.rst): NewAE documentation preserved in a third-party fork; setup examples may use older APIs.

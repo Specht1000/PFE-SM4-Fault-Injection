@@ -1,6 +1,6 @@
 \section{Why the analyses contain four SM4 configurations}
 \label{sec:four_sm4_configurations}
-The four plotted names describe experimental configurations, not four independently published attacks. The SM4 ``Piret'' label denotes this project's controlled known-mask DFA. The SM4 ``Giraud'' label denotes its single-bit-inspired filter. Neither name claims an unchanged transfer of an AES attack to SM4. In particular, the known XOR magnitude required by the SM4 example must not be attributed to every classical Piret--Quisquater fault model.
+The four plotted names describe experimental configurations, not four independently published attacks. The SM4 ``Piret'' label denotes this project's controlled known-mask DFA. The SM4 ``Giraud'' label denotes its single-bit-inspired filter. Neither name claims an unchanged transfer of the original published attack to SM4. In particular, the known XOR magnitude required by the SM4 example must not be attributed to every classical Piret--Quisquater fault model.
 
 \begin{center}\small
 \begin{tabular}{P{.23\linewidth}P{.31\linewidth}P{.34\linewidth}}\toprule
@@ -36,7 +36,7 @@ For the first worked observation, $d=\hex{4F}$ and $q=\hex{07}$. Knowing $e=\hex
 Thus the two filters do not extract the same information from that pair.
 
 \paragraph{Why some plotted results coincide.}
-Piret with matched bits and Giraud with known bit test the same equation with the same observations. Their full candidate histories were checked for equality in all 100 paired trials. Separate graph panels expose these equal results. Equality here is a control result, not evidence that the historical AES attacks are identical.
+Piret with matched bits and Giraud with known bit test the same equation with the same observations. Their full candidate histories were checked for equality in all 100 paired trials. Separate graph panels expose these equal results. Equality here is a control result, not evidence that the original published attacks are identical.
 
 \subsection{What the 100-trial comparison actually establishes}
 All four configurations recovered and verified the full key in 100 seeded software trials. The three known-mask configurations consumed 32 faulty outputs each. Unknown-bit Giraud consumed a mean of 35.06, a median of 35 and a range of 32--40. These are dataset results, not universal fault requirements. Offline timing differences between equivalent filters describe implementation overhead.
