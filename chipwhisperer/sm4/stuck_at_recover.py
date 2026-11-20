@@ -118,6 +118,48 @@ def collect_round(scope, target, configure, args, number, baseline, log, out_lis
                     record.append((width, offset, delay))
 
 
+def explain_recovery(log, plaintext, baseline, faulty_by_round, master):
+    """Replay the recovery step by step into the log, using the found subkeys to
+    show, for each round and byte, how a stuck-at fault pins that key byte."""
+    schedule = sm4.key_expansion(master)
+    log.line("Step-by-step recovery (how each key byte follows from a stuck-at fault):", "green")
+
+    for number in (31, 30, 29, 28):
+        later = {n: schedule[n] for n in range(number + 1, 32)}
+        clean = piret_sm4.peel_sm4(baseline, number, later)
+        c = struct.unpack(">4I", clean)
+        peeled = ",".join(str(n) for n in sorted(later)) or "none"
+        log.line(f"  rk{number} (peel rounds: {peeled}):", "cyan")
+        subkey = [None, None, None, None]
+
+        for faulty in faulty_by_round.get(number, ()):
+            f = struct.unpack(">4I", piret_sm4.peel_sm4(faulty, number, later))
+            if c[1:] != f[1:] or c[0] == f[0]:
+                continue
+            delta_b = piret_sm4.inverse_linear(c[0] ^ f[0])
+            nonzero = [b for b in range(4) if (delta_b >> (24 - 8 * b)) & 255]
+            if len(nonzero) != 1:
+                continue
+            byte = nonzero[0]
+            if subkey[byte] is not None:
+                continue
+            shift = 24 - 8 * byte
+            d = (delta_b >> shift) & 255
+            q = ((c[1] ^ c[2] ^ c[3]) >> shift) & 255
+            true_byte = (schedule[number] >> shift) & 255
+            for stuck in (0x00, 0xFF):
+                if piret_sm4.INV_SBOX[d ^ stuck] ^ q == true_byte:
+                    subkey[byte] = true_byte
+                    log.line(f"    byte {byte}: dX35={c[0] ^ f[0]:08X}  L^-1={delta_b:08X}  d={d:02X}  q={q:02X}"
+                             f"  | forced V={stuck:02X} -> S^-1(d^V)^q = {true_byte:02X}", "cyan")
+                    break
+
+        assembled = "".join(f"{b:02X}" if b is not None else "??" for b in subkey)
+        log.line(f"    => rk{number} = {assembled}", "green")
+
+    log.line(f"  reverse SM4 schedule (rk28..rk31) and strip FK -> master key {master.hex().upper()}", "green")
+
+
 def run(args, connect):
     log = SessionLog("stuck_at_recover")
     scope = None
@@ -189,6 +231,7 @@ def run(args, connect):
         master = piret_sm4.recover_stuck_at(args.input, baseline, faulty_by_round)
 
         if master is not None and sm4.sm4_encrypt_block(args.input, master) == baseline:
+            explain_recovery(log, args.input, baseline, faulty_by_round, master)
             log.line("RECOVERED MASTER KEY: " + master.hex().upper(), "green")
             log.line("Re-encryption check: PASS", "green")
             return 0
