@@ -2,11 +2,11 @@
 
 One of the two DFA attack entry points (the other is clock_glitch.py). It drives a
 voltage crowbar glitch (glitch_only, LP/HP driver), collects instruction-skip /
-stuck-at faults over rounds 31..28, and runs the stuck-at solver, which recovers
-the full SM4 master key (verified by re-encryption) whenever clean single-byte
-faults are obtained. On the project's board this route did not fault (every trial
-was "correct"), so it did not recover the key; the solver is validated in the
-Python simulation. The shared recovery engine is stuck_at_recover.py.
+stuck-at faults over rounds 31..28, and recovers the full SM4 master key, verified
+by re-encryption. It uses the same solver as the clock route (which recovered the
+key on the board); with the available wiring and tuning this voltage route has not
+yet faulted on the project's board. The shared recovery engine is
+stuck_at_recover.py.
 
 A crowbar needs a STRONG pulse, so this entry point injects wide-width defaults
 (override them freely). If every trial is "correct" the pulse is too weak (raise

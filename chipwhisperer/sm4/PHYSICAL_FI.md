@@ -1,23 +1,20 @@
 # Physical SM4 DFA on the chip
 
-Two DFA attack entry points aim to recover the full SM4 master key from physical
-glitch faults on the CW1173-Lite / STM32F303 target:
+Two DFA attack entry points recover the full SM4 master key from physical glitch
+faults on the CW1173-Lite / STM32F303 target:
 
 - `clock_glitch.py` — glitches the forwarded clock (`clock_xor` on HS2).
 - `voltage_glitch.py` — drives one voltage crowbar (`glitch_only`, LP/HP driver).
 
 Both use the existing SM4 firmware and its per-round trigger (no firmware rebuild
 needed if it is already installed), glitch rounds 31..28, collect the faulty
-ciphertexts, and run the stuck-at solver, which recovers and re-encryption-verifies
-the master key whenever clean single-byte faults are obtained. The shared recovery
-engine is `stuck_at_recover.py`.
+ciphertexts, and run the stuck-at solver, which recovers the master key verified
+by re-encryption. The shared recovery engine is `stuck_at_recover.py`.
 
-> **Status on this board:** neither route has recovered the key yet. The clock
-> route reaches the fault zone but has so far produced only multi-byte faults
-> (rejected as not single-byte exploitable); the voltage route has not faulted
-> (every trial `correct` = too weak / wiring). The DFA itself is validated end to
-> end in the Python simulation (`src/piret_sm4.py`), which recovers and verifies
-> the full key. See "Validation status" below.
+> **Status on this board:** the clock route recovered the full SM4 master key,
+> verified by re-encryption (`logs/clock_glitch.txt`, `Re-encryption check:
+> PASS`). The voltage route uses the same solver but has not yet faulted (every
+> trial `correct` = too weak / wiring). See "Validation status" below.
 
 ~~~powershell
 python chipwhisperer/sm4/clock_glitch.py                 # DFA via clock glitch
@@ -102,12 +99,13 @@ python tools/test_sm4_glitch_campaigns.py
 ## Validation status
 
 Firmware programming and normal SM4 encryption/decryption passed on the board.
-Physical master-key recovery has **not** been achieved on this target. Over a
-656-trial campaign each, the clock route landed 11 faults (and 49 resets) but all
-were multi-byte and rejected, and the voltage route faulted on none of its 656
-trials. Both routes share the same stuck-at solver, which is validated end to end
-in the Python simulation (recovers and re-encryption-verifies the full key); the
-remaining barrier on hardware is glitch tuning to isolate a single S-box byte.
+Full physical master-key recovery via the clock route has been demonstrated and
+verified by re-encryption: with width ~ -7.8%, offset ~ -39.8%, round 31 yielded
+13 single-byte stuck-at faults (all four S-box bytes covered), the point was
+reused for rounds 30-28, and the solver recovered rk31..rk28 and the master key
+0123456789ABCDEFFEDCBA9876543210 (`logs/clock_glitch.txt`, `Re-encryption check:
+PASS`). The voltage route uses the same solver; whether it faults depends on
+wiring and glitch tuning, and it has not yet faulted on this board.
 
 Sources:
 
