@@ -74,20 +74,21 @@ physical glitch is applied by this firmware/client. This establishes a clean
 reference target for subsequent side-channel/FI work. It is an intentionally
 readable, table-based implementation, not a hardened cryptographic library.
 
-## Physical fault-injection campaigns
+## Physical DFA attacks on the chip
 
-Clock and voltage injection have separate entry points:
+Two entry points recover the full SM4 master key from physical glitch faults
+(instruction-skip / stuck-at model), verified by re-encryption:
 
 ~~~powershell
-python chipwhisperer/sm4/clock_glitch.py --dry-run
-python chipwhisperer/sm4/voltage_glitch.py --dry-run
+python chipwhisperer/sm4/clock_glitch.py                 # DFA via clock glitch
+python chipwhisperer/sm4/voltage_glitch.py --driver lp   # DFA via voltage glitch
 ~~~
 
-See [PHYSICAL_FI.md](PHYSICAL_FI.md) for the actual acquisition commands, required
-connections, parameter units, trial classification and ciphertext-only DFA
-filtering. These campaign scripts apply physical perturbations when run without
---dry-run; the normal client above still performs no fault injection. No physical
-glitch-yield or key-recovery result is claimed from their local/mock tests.
+See [PHYSICAL_FI.md](PHYSICAL_FI.md) for the fault model, the recovery procedure,
+required connections, glitch tuning (correct = too weak, no-response = too strong)
+and the per-method logs (`logs/clock_glitch.*`, `logs/voltage_glitch.*`). The
+shared recovery engine is `stuck_at_recover.py`. These scripts apply physical
+perturbations; the normal client above performs no fault injection.
 
 ## Files
 
@@ -98,6 +99,10 @@ glitch-yield or key-recovery result is claimed from their local/mock tests.
 | firmware/Makefile | CWLITEARM, SimpleSerial 1.1, no external crypto library, -O0 |
 | build.py | Stage sources in the SDK and produce flashable firmware |
 | client.py | Program, encrypt, decrypt, verify and optionally capture power |
+| clock_glitch.py | DFA attack entry point via clock glitch (master-key recovery) |
+| voltage_glitch.py | DFA attack entry point via voltage glitch (master-key recovery) |
+| stuck_at_recover.py | Shared stuck-at recovery engine used by both attacks |
+| glitch_common.py | Acquisition helpers and the input-word/Giraud library models |
 | requirements.txt | Python host dependency |
 | commands.txt | Copyable commands from the repository root |
 

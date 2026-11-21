@@ -399,13 +399,13 @@ def run_campaign(kind, configure_attack, argv=None, log=None):
                             if row["status"] in ("dfa_compatible", "duplicate", "model_conflict"):
                                 if row.get("model") == "giraud-sbox-input":
                                     log.line(f"  Observed fault: S-box input of round {args.round}, byte {row['byte']}, single-bit (Giraud, unknown bit)", tone)
-                                    log.line(f"  Newest-word diff {row['newest_word_diff']}  ->  L^-1 = {row['delta_b']}  =>  S-box output diff d={row['sbox_output_diff']} (byte {row['byte']})", tone)
-                                    log.line(f"  Public q={row['q']}  ->  keep k with some 1-bit e: S(q^k) ^ S(q^k^e) = d", tone)
+                                    log.line(f"  Newest-word diff {row['newest_word_diff']}  ->  L_inv = {row['delta_b']}  =>  S-box output diff d={row['sbox_output_diff']} (byte {row['byte']})", tone)
+                                    log.line(f"  Public q={row['q']}  ->  keep k with some 1-bit e: S(q XOR k) XOR S(q XOR k XOR e) = d", tone)
                                 else:
                                     word_index = args.round + row["input_word"]
                                     log.line(f"  Observed fault: input word X{word_index}, byte {row['byte']}, input mask {row['observed_mask']}", tone)
-                                    log.line(f"  Newest-word diff {row['newest_word_diff']}  ->  L^-1 = {row['delta_b']}  =>  S-box output diff d={row['sbox_output_diff']} (byte {row['byte']})", tone)
-                                    log.line(f"  Public q={row['q']}, q'={row['q_faulty']}  ->  solve S(q^k) ^ S(q'^k) = d", tone)
+                                    log.line(f"  Newest-word diff {row['newest_word_diff']}  ->  L_inv = {row['delta_b']}  =>  S-box output diff d={row['sbox_output_diff']} (byte {row['byte']})", tone)
+                                    log.line(f"  Public q={row['q']}, q'={row['q_faulty']}  ->  solve S(q XOR k) XOR S(q' XOR k) = d", tone)
                                 pair_hex = " ".join(f"{k:02X}" for k in row["pair_candidates"])
                                 log.line(f"  Candidates from this pair ({len(row['pair_candidates'])}): {pair_hex}", tone)
                                 if row.get("model") == "giraud-sbox-input":

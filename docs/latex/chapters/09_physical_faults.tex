@@ -2,7 +2,7 @@
 \label{chap:physical_fi}
 \section{Platform and tested baseline}
 The CW1173 Lite ARM capture device supplies the STM32F303 target clock and communicates through SimpleSerial 1.1 at 38400 baud. The project's firmware performs normal SM4 encryption and decryption. A selectable GPIO trigger marks the whole block or one processing round, and key expansion and serial transmission remain outside the marked operation.
-The target firmware has been programmed over USB and its official encryption/decryption vector verified on the connected board. The physical glitch campaigns described below have been implemented and checked with local tests; no physical fault-yield or key-recovery result is claimed.
+The target firmware has been programmed over USB and its official encryption/decryption vector verified on the connected board. The clock-glitch attack described below has been executed on the board and recovered the full SM4 master key, verified by re-encryption (Section~\ref{sec:stuck_at_result}).
 \section{Two separate attack entry points}
 \begin{center}\begin{tabular}{P{.25\linewidth}P{.32\linewidth}P{.32\linewidth}}\toprule
  & Clock glitching & Voltage glitching\\\midrule
@@ -13,14 +13,13 @@ Glitch output & \texttt{clock\_xor} & \texttt{glitch\_only}\\
 Crowbar & Both disabled & Exactly one of LP or HP enabled\\
 Possible results & Correct result, corrupted computation, invalid response or no response & Correct result, corrupted computation, invalid response or no response\\\bottomrule
 \end{tabular}\end{center}
-Both files are under \texttt{chipwhisperer/sm4/}. Shared transport, parameter sweeps, classification and DFA filtering live in \texttt{glitch\_common.py}. No synthetic XOR is inserted by these scripts.
+Both files are under \texttt{chipwhisperer/sm4/} and are the two DFA attack entry points: each recovers the full master key through its glitch route. They share the stuck-at recovery engine \texttt{stuck\_at\_recover.py}; acquisition helpers and the simulation-only input-word/Giraud models live in \texttt{glitch\_common.py}. No synthetic XOR is inserted.
 \section{Clock glitching}
 The target uses the clock supplied by the scope. The FPGA's glitch block perturbs that forwarded signal around a trigger-relative position. The result depends on the actual instruction stream, timing margins and pulse shape; it is not equivalent to commanding a chosen data-bit flip.
 \begin{lightcode}
-python chipwhisperer/sm4/clock_glitch.py --dry-run
-python chipwhisperer/sm4/clock_glitch.py --round 31 --max-trials 200
+python chipwhisperer/sm4/clock_glitch.py
 \end{lightcode}
-The dry run prints the sweep without connecting to USB. The second command performs physical attempts when executed with the board connected.
+With the board connected this performs the whole attack: it glitches rounds 31 through 28, collects the faulty ciphertexts and recovers the master key. The glitch defaults to the NewAE CW-Lite ARM regime; \texttt{--widths}, \texttt{--offsets}, \texttt{--delays} and \texttt{--repeat} tune it.
 
 \begin{figure}[H]\centering
 \resizebox{.95\linewidth}{!}{%
@@ -63,10 +62,9 @@ timing margins; it is not a commanded data-bit flip.}
 \section{Voltage glitching}
 The normal target clock is preserved. A pulse drives one crowbar MOSFET using the scope's Glitch output, connected to the target's intended voltage-glitch path. The physical target revision, connector and supply arrangement must match the hardware documentation; a software flag alone does not establish this connection.
 \begin{lightcode}
-python chipwhisperer/sm4/voltage_glitch.py --dry-run
-python chipwhisperer/sm4/voltage_glitch.py --round 31 --driver lp
+python chipwhisperer/sm4/voltage_glitch.py --driver lp
 \end{lightcode}
-LP is the default; HP can be selected explicitly. The script does not enable both. The driver is disabled after every attempt and during cleanup. The selected pulse is a brief low-going perturbation, not a supply overvoltage.
+LP is the default crowbar; \texttt{--driver hp} selects the stronger one. Only one is enabled, and it is disabled after every attempt and during cleanup. The selected pulse is a brief low-going perturbation, not a supply overvoltage. A crowbar needs a stronger pulse than a clock glitch, so this entry point defaults to wider positive widths.
 
 \begin{figure}[H]\centering
 \resizebox{.95\linewidth}{!}{%
@@ -110,17 +108,16 @@ short low-going perturbation of the board's own rail.}
 \end{figure}
 
 \section{Sweep parameters and units}
-\begin{center}\begin{tabular}{P{.30\linewidth}P{.58\linewidth}}\toprule
+\begin{center}\begin{tabular}{P{.34\linewidth}P{.54\linewidth}}\toprule
 Option & Meaning\\\midrule
-\texttt{--widths 2,5,10} & Pulse widths as percentages of one clock cycle\\
-\texttt{--offsets 0,10} & Fine phase offsets as percentages of a clock cycle\\
-\texttt{--delays 0:100:10} & Coarse delay after the trigger, in clock cycles, inclusive endpoints\\
-\texttt{--repeat 1} & Consecutive glitch repetitions per event; not the number of independent trials\\
-\texttt{--attempts-per-point 1} & Independent attempts at each parameter point\\
-\texttt{--max-trials 200} & Upper limit on attempts for this execution\\
-\texttt{--round 31} & Firmware trigger selects this processing round\\\bottomrule
+\texttt{--widths -8,-9,-10,-11} & Pulse widths, percentages of one clock cycle (negative for clock, wide positive for voltage)\\
+\texttt{--offsets -40,-38,-42} & Fine phase offsets, percentages of a clock cycle\\
+\texttt{--delays 0:170:1} & Delay after the per-round trigger, in clock cycles, inclusive endpoints\\
+\texttt{--repeat 3} & Consecutive glitch repetitions per triggered event\\
+\texttt{--max-trials} & Upper limit on attempts per round\\
+\texttt{--driver lp|hp} & Voltage crowbar choice (voltage only)\\\bottomrule
 \end{tabular}\end{center}
-The default grid has 66 attempts before early termination. These values are starting points, not experimentally established successful settings. Requested and hardware-quantized width/offset values are both saved. The glitch clock DCMs must report locked before trials proceed.
+The attack glitches rounds 31 down to 28 automatically, so no round is selected by hand. These defaults are starting points; the glitch DCMs must report locked before trials proceed. Requested and hardware-quantized width/offset values are both recorded.
 \section{Acquisition sequence}
 \begin{enumerate}
 \item Disable voltage drivers and restore the normal clock.
@@ -128,28 +125,23 @@ The default grid has 66 attempts before early termination. These values are star
 \item Before the campaign, capture a clean baseline and check the normal SM4 result.
 \item Configure the physical glitch route, arm an external single-shot trigger, and request encryption.
 \item Read the full 16-byte result and ACK. Restore normal routing after the attempt.
-\item Log the result and parameters. Infer candidate fault descriptors from outputs, then apply the DFA filter.
+\item Log the result and its status, keeping every faulty ciphertext for the recovery step.
 \end{enumerate}
 The reset/key load is repeated before every attempt, so a previous crash or target reset cannot silently leave the experiment with a stale key.
-\section{Classify before attempting recovery}
+\section{Reading the log and tuning the glitch}
+Each attempt is classified, and the per-trial status is the main tuning signal. The
+useful regime lies \emph{between} ``too weak'' and ``too strong''.
 \begin{center}\begin{tabular}{P{.28\linewidth}P{.61\linewidth}}\toprule
-Status & Interpretation\\\midrule
-\texttt{correct} & Complete response equal to the clean baseline\\
-\texttt{timeout\_or\_reset} & No complete response or capture; a reset is not independently proven\\
-\texttt{invalid\_response} & Invalid length or nonzero ACK\\
-\texttt{faulty\_rejected} & Different ciphertext that fails the assumed single-byte input model\\
-\texttt{dfa\_compatible} & Output pattern passes the model checks and yields candidates\\
-\texttt{duplicate} & Repeated faulty view, not counted as a new independent observation\\
-\texttt{model\_conflict} & Empty candidate intersection; stop and reassess the model\\\bottomrule
+Status & Meaning and action\\\midrule
+\texttt{correct} & No effect: the glitch is too weak. Raise \texttt{--widths}/\texttt{--repeat}; for voltage try \texttt{--driver hp}\\
+\texttt{no-response} & Reset or crash: the glitch is too strong. Lower \texttt{--widths}\\
+\texttt{fault} & A fault landed and was recorded: you are in the useful zone\\
+coverage \texttt{MISSING} & A byte never got a clean fault: vary \texttt{--delays} to hit its S-box lookup\\\bottomrule
 \end{tabular}\end{center}
-A compatible pair must change exactly one copied input word in exactly one byte. The newest-word difference must invert through $L^{-1}$ to that same byte. The observed copied-word XOR provides the candidate mask; glitch width and offset never supply that mask directly.
-\section{From observations to subkeys}
-The scripts intersect the 256 possible key-byte candidates for each observed byte. They do not choose the byte physically; a campaign may never obtain useful faults for all four bytes. If all four become unique, the script exports a model-dependent round-key candidate.
-To attack an earlier round, supply the saved JSON with the later subkey candidates:
-\begin{lightcode}
-python chipwhisperer/sm4/clock_glitch.py --round 30 --recovered-keys logs/clock_glitch_recovery.json
-\end{lightcode}
-Round 30 requires $rk_{31}$; round 29 requires $rk_{31},rk_{30}$; round 28 requires all three later keys. Only after four consecutive tail keys are available can the master-key candidate be reversed and checked by re-encryption. No uniqueness or full key recovery is guaranteed by a parameter sweep.
+Each entry point writes its own colour-coded log, \texttt{logs/clock\_glitch.*} or
+\texttt{logs/voltage\_glitch.*}, with a heartbeat (so a non-faulting sweep is still
+legible), a per-round status summary, a per-byte coverage line and a step-by-step
+recovery derivation.
 
 \section{Instruction-skip (stuck-at) recovery: the achieved result}
 \label{sec:stuck_at_result}
@@ -189,7 +181,8 @@ schedule, and the master key is confirmed by re-encryption.
 \end{enumerate}
 
 \begin{lightcode}
-python chipwhisperer/sm4/stuck_at_recover.py
+python chipwhisperer/sm4/clock_glitch.py
+python chipwhisperer/sm4/voltage_glitch.py --driver lp
 \end{lightcode}
 
 \paragraph{Measured outcome.}
@@ -203,7 +196,67 @@ against the clean ciphertext} \hex{681EDF34D206965E86B3E94F536E4246}. This is a
 full, verified physical key recovery, not a simulation. The same stuck-at
 pipeline accepts voltage-glitch faults; the glitch route only changes how the
 stuck-at fault is produced, not how it is solved.
+\section{Fault landscape and DFA efficiency}
+\label{sec:fault_landscape}
+Figure~\ref{fig:sbox_ddt} is the SM4 S-box difference distribution table: every
+non-trivial entry is only $0$, $2$ or $4$, so for a known input difference each
+output difference comes from very few S-box inputs. That sparsity is why a single
+faulted byte prunes the last-round key byte so sharply. Figure~\ref{fig:dfa_pruning}
+quantifies it: the known-mask (Piret) differential collapses $256$ candidates to a
+median of two after one fault and to one after two, while a clean stuck-at fault
+pins the byte from a single observation.
+
+\begin{figure}[H]\centering
+\includegraphics[width=.60\linewidth]{figures/fig_sbox_ddt.png}
+\caption{SM4 S-box difference distribution table (input difference $1$--$255$).
+Entries are only $0$, $2$ or $4$; this sparsity makes a single-byte fault highly
+informative for key recovery.}
+\label{fig:sbox_ddt}
+\end{figure}
+
+\begin{figure}[H]\centering
+\includegraphics[width=.72\linewidth]{figures/fig_dfa_pruning.png}
+\caption{Candidate pruning per key byte. The known-mask differential leaves a
+median of two candidates after one fault and one after two; a stuck-at fault
+(this project's target) determines the byte from one clean observation.}
+\label{fig:dfa_pruning}
+\end{figure}
+
+Where each glitch actually faults is narrow. Figure~\ref{fig:fault_zone}
+reproduces the measured fault zones of a comparable SM4 study (Zhang et al.,
+\emph{Electronics} 2026, 15:5205): the clock glitch faults only in a tight width
+band (around $60$--$70$~ns on a $250$~ns clock, resetting beyond it), and the
+voltage glitch needs a wide pulse and a deep supply drop; both thresholds fall as
+temperature rises. This is why the voltage entry point defaults to wide pulses,
+and why the useful regime lies between ``too weak'' (all correct) and ``too
+strong'' (resets).
+
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{figures/fig_fault_zone.png}
+\caption{Clock and voltage fault zones at several temperatures (data: Zhang et
+al., \emph{Electronics} 2026, 15:5205). The clock glitch faults in a narrow width
+band; the voltage glitch needs a wide, deep pulse.}
+\label{fig:fault_zone}
+\end{figure}
+
+Finally, even a well-tuned campaign yields mostly unusable faults.
+Figure~\ref{fig:fault_types} shows that only about $14\%$ (coupled) or $11\%$
+(voltage-only) of injections are clean single-byte faults; the majority are
+multi-byte or no-effect. This matches the project's board, where most faults are
+multi-byte and the stuck-at solver keeps the clean single-byte ones and votes the
+rest away.
+
+\begin{figure}[H]\centering
+\includegraphics[width=.72\linewidth]{figures/fig_fault_types.png}
+\caption{Fault-outcome distribution (data: Zhang et al., \emph{Electronics} 2026,
+15:5205). Only a small fraction of injections are the single-byte faults DFA can
+use directly.}
+\label{fig:fault_types}
+\end{figure}
+
 \section{Evidence and output files}
-Each method overwrites its own TXT/colored HTML log, CSV of all attempts, and recovery JSON, under \texttt{logs/clock\_glitch.*} or \texttt{logs/voltage\_glitch.*}. JSON also retains partial observations on interruption. The two methods do not overwrite each other's results. Experimental success rates must be reported from these measured records, with sample count and tested grid; dry runs and mock tests are not physical results.
+Each attack writes its own TXT and coloured HTML log --- \texttt{logs/clock\_glitch.*} or \texttt{logs/voltage\_glitch.*} --- recording every faulty ciphertext, the per-round status summary, the per-byte coverage and the recovery derivation. A Ctrl+C still attempts recovery with the faults collected so far. The two attacks do not overwrite each other's logs. Experimental success must be reported from these measured records; mock tests are not physical results.
+\section{Other fault models (library only)}
+The module \texttt{glitch\_common.py} also implements the input-word Piret model and the single-bit Giraud filter (\texttt{run\_campaign}, \texttt{infer\_fault}), used for the simulation study and the earlier chapters and exercised by the test suite. They are not chip attack entry points, because the faults the board actually produces are stuck-at, not input-word or single-bit.
 \section{Source documentation}
-The configuration follows NewAE's scope/glitch API and CW1173 hardware documentation. See the bibliography for clickable links, the hardware-security laboratory repository, and the historical CW1173 documentation. Electromagnetic and laser injection require additional equipment and are outside the two implemented campaigns.
+The configuration follows NewAE's scope/glitch API and CW1173 hardware documentation, and the NewAE Fault201 DFA labs (Lab~1\_3A/1\_3B) that guided the clock-glitch regime. See the bibliography for clickable links. Electromagnetic and laser injection require additional equipment and are outside the two implemented attacks.

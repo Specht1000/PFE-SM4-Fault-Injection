@@ -66,8 +66,11 @@ def collect_round(scope, target, configure, args, number, baseline, log, out_lis
     Ctrl+C keeps partial results). With points=None it sweeps the full grid; with
     an explicit list of (width, offset, delay) it replays just those. If `record`
     is given, each (width, offset, delay) that yields a clean single-byte round-31
-    fault is appended to it, so deeper rounds can reuse only the useful points."""
+    fault is appended to it. Returns a dict of outcome counts so the caller can
+    report progress even when the glitch never faults (e.g. an untuned voltage
+    route). A heartbeat line is logged every 40 trials so the run is never silent."""
     seen = set(out_list)
+    counts = {"correct": 0, "fault": 0, "timeout_or_reset": 0, "invalid_response": 0}
     trials = 0
     last_setting = None
 
@@ -81,10 +84,10 @@ def collect_round(scope, target, configure, args, number, baseline, log, out_lis
 
     for width, offset, delay in grid:
         if trials >= args.max_trials:
-            return
+            return counts
         # Round 31 coverage is exact (no peeling), so stop once all four bytes hit.
         if number == 31 and len(_round31_bytes(baseline, out_list)) == 4:
-            return
+            return counts
 
         if last_setting != (width, offset):
             disable_attack(scope)
@@ -107,7 +110,12 @@ def collect_round(scope, target, configure, args, number, baseline, log, out_lis
 
         trials += 1
 
-        if data is not None and len(data) == 16 and bytes(data) != baseline:
+        if status != "received":
+            counts[status] = counts.get(status, 0) + 1
+        elif bytes(data) == baseline:
+            counts["correct"] += 1
+        else:
+            counts["fault"] += 1
             faulty = bytes(data)
             if faulty not in seen:
                 seen.add(faulty)
@@ -116,6 +124,25 @@ def collect_round(scope, target, configure, args, number, baseline, log, out_lis
 
                 if record is not None and len(_round31_bytes(baseline, [faulty])) == 1:
                     record.append((width, offset, delay))
+
+        # Heartbeat: show the run is alive even when nothing faults.
+        if trials % 40 == 0:
+            log.line(f"  round {number}: {trials} trials | {len(out_list)} fault(s), "
+                     f"{counts['correct']} correct, {counts['timeout_or_reset']} no-response", "cyan")
+
+    return counts
+
+
+def _log_round_summary(log, number, faults, counts):
+    """One line per round, shown even with zero faults so the run is legible."""
+    total = sum(counts.values())
+    log.line(f"Round {number}: {len(faults)} distinct fault(s) from {total} trials "
+             f"(correct={counts.get('correct', 0)}, no-response={counts.get('timeout_or_reset', 0)}, "
+             f"invalid={counts.get('invalid_response', 0)}).", "green" if faults else "red")
+    if not faults and total:
+        log.line(f"  No faults at round {number}: the glitch did not disturb the cipher at any "
+                 f"swept point. Tune the glitch (for voltage, try different widths/offsets and "
+                 f"--driver hp/lp); 'correct' means too weak, 'no-response' means too strong.", "red")
 
 
 def explain_recovery(log, plaintext, baseline, faulty_by_round, master):
@@ -150,8 +177,8 @@ def explain_recovery(log, plaintext, baseline, faulty_by_round, master):
             for stuck in (0x00, 0xFF):
                 if piret_sm4.INV_SBOX[d ^ stuck] ^ q == true_byte:
                     subkey[byte] = true_byte
-                    log.line(f"    byte {byte}: dX35={c[0] ^ f[0]:08X}  L^-1={delta_b:08X}  d={d:02X}  q={q:02X}"
-                             f"  | forced V={stuck:02X} -> S^-1(d^V)^q = {true_byte:02X}", "cyan")
+                    log.line(f"    byte {byte}: dX35={c[0] ^ f[0]:08X}  L_inv={delta_b:08X}  d={d:02X}  q={q:02X}"
+                             f"  | forced V={stuck:02X} -> Sinv(d XOR V) XOR q = {true_byte:02X}", "cyan")
                     break
 
         assembled = "".join(f"{b:02X}" if b is not None else "??" for b in subkey)
@@ -160,8 +187,8 @@ def explain_recovery(log, plaintext, baseline, faulty_by_round, master):
     log.line(f"  reverse SM4 schedule (rk28..rk31) and strip FK -> master key {master.hex().upper()}", "green")
 
 
-def run(args, connect):
-    log = SessionLog("stuck_at_recover")
+def run(args, connect, log_name="stuck_at_recover"):
+    log = SessionLog(log_name)
     scope = None
     target = None
 
@@ -189,8 +216,8 @@ def run(args, connect):
         good_points = []
         try:
             # Round 31 first: full grid, exact coverage, and learn the useful points.
-            collect_round(scope, target, configure, args, 31, baseline, log, faulty_by_round[31], record=good_points)
-            log.line(f"Round 31: {len(faulty_by_round[31])} distinct faulty ciphertext(s).", "green")
+            counts = collect_round(scope, target, configure, args, 31, baseline, log, faulty_by_round[31], record=good_points)
+            _log_round_summary(log, 31, faulty_by_round[31], counts)
 
             # The four S-box lookups sit at the same trigger-relative delays every
             # round, so reuse round 31's useful points (plus a small +/-2 window)
@@ -204,8 +231,8 @@ def run(args, connect):
             log.line(f"Reusing {len(focused)} good glitch point(s) for rounds 30, 29, 28.", "green")
 
             for number in (30, 29, 28):
-                collect_round(scope, target, configure, args, number, baseline, log, faulty_by_round[number], points=focused)
-                log.line(f"Round {number}: {len(faulty_by_round[number])} distinct faulty ciphertext(s).", "green")
+                counts = collect_round(scope, target, configure, args, number, baseline, log, faulty_by_round[number], points=focused)
+                _log_round_summary(log, number, faulty_by_round[number], counts)
         except KeyboardInterrupt:
             log.line("Interrupted during collection; attempting recovery with the faults collected so far.", "red")
 
@@ -264,9 +291,12 @@ def _connect(args):
     return scope, target, cw
 
 
-def main(argv=None):
+def main(argv=None, method=None, log_name="stuck_at_recover"):
     parser = argparse.ArgumentParser(description="SM4 stuck-at master-key recovery.")
-    parser.add_argument("--method", choices=("clock", "voltage"), default="clock")
+    # When `method` is fixed by a wrapper (recover_clock.py / recover_voltage.py)
+    # the --method flag is hidden; otherwise it is selectable.
+    if method is None:
+        parser.add_argument("--method", choices=("clock", "voltage"), default="clock")
     parser.add_argument("--key", type=parse_block, default=sm4.KEY)
     parser.add_argument("--input", type=parse_block, default=sm4.PLAINTEXT)
     # Defaults follow NewAE's CW-Lite ARM (STM32) DFA lab: width ~ -9, offset ~ -40,
@@ -281,10 +311,13 @@ def main(argv=None):
     parser.add_argument("--serial-number")
     args = parser.parse_args(argv)
 
+    if method is not None:
+        args.method = method
+
     if args.max_trials < 1 or args.timeout < 1:
         parser.error("Trial limit and timeout must be positive.")
 
-    return run(args, _connect)
+    return run(args, _connect, log_name=log_name)
 
 
 if __name__ == "__main__":

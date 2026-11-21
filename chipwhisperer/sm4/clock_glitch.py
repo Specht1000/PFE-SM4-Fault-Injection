@@ -1,5 +1,15 @@
-"""Clock-glitch campaign on the STM32F303 SM4 target, with DFA filtering."""
-from glitch_common import run_campaign
+"""DFA attack on the SM4 chip via CLOCK glitching: recover the master key.
+
+One of the two DFA attack entry points (the other is voltage_glitch.py). It drives
+a clock glitch (clock_xor on HS2), collects instruction-skip / stuck-at faults over
+rounds 31..28, and recovers the full SM4 master key, verified by re-encryption.
+The shared recovery engine is stuck_at_recover.py.
+
+Run (board connected):
+  python chipwhisperer/sm4/clock_glitch.py
+Output: logs/clock_glitch.txt / .html, plus the recovered key if found.
+"""
+import stuck_at_recover
 
 
 def configure_attack(scope, driver):
@@ -9,5 +19,9 @@ def configure_attack(scope, driver):
     scope.io.hs2 = "glitch"
 
 
+def main(argv=None):
+    return stuck_at_recover.main(argv, method="clock", log_name="clock_glitch")
+
+
 if __name__ == "__main__":
-    raise SystemExit(run_campaign("clock", configure_attack))
+    raise SystemExit(main())

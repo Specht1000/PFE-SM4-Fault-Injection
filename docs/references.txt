@@ -9,3 +9,4 @@ https://chipwhisperer.readthedocs.io/en/latest/Capture/ChipWhisperer-Lite.html
 https://chipwhisperer.readthedocs.io/en/latest/cw_tips_tricks/basics/glitch_hp_vs_lp.html
 https://github.com/newaetech/chipwhisperer-jupyter/blob/main/courses/fault201/Lab%201_3A%20-%20DFA%20Attack%20Against%20Final%20MixColumns.ipynb
 https://github.com/newaetech/chipwhisperer-jupyter/blob/main/courses/fault201/Lab%201_3B%20-%20DFA%20Attack%20on%20AES.ipynb
+https://doi.org/10.3390/electronics15225205
