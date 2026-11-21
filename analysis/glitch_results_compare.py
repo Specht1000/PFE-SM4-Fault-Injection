@@ -60,25 +60,47 @@ def main():
             ("fault", C_FAULT, "fault landed  (multi-byte - rejected)"),
             ("usable", C_USABLE, "usable single-byte fault")]
 
+    centers = {}  # (segment key, bar index) -> y-center, for callouts
     bottoms = [0, 0]
     for key, color, lab in segs:
         vals = [d[key] for d in data]
         bars = ax.bar(x, vals, 0.55, bottom=bottoms, color=color, label=lab,
                       edgecolor="white", linewidth=0.8)
-        for i, (b, v) in enumerate(zip(bars, vals)):
-            if v > 0:
+        for i, v in enumerate(vals):
+            centers[(key, i)] = bottoms[i] + v / 2
+            # Only label big segments inside the bar; small slivers get callouts.
+            if v >= 60:
                 ax.text(i, bottoms[i] + v / 2, str(v), ha="center", va="center",
-                        color="white", fontsize=10, weight="bold")
+                        color="white", fontsize=11, weight="bold")
         bottoms = [bt + v for bt, v in zip(bottoms, vals)]
 
     for i, d in enumerate(data):
-        ax.text(i, d_total := d["total"], f"{d['total']} trials", ha="center",
+        ax.text(i, d["total"] + 8, f"{d['total']} trials", ha="center",
                 va="bottom", color=INK, fontsize=10, weight="bold")
+
+    # Callouts for the clock bar's thin slivers (reset 49, fault 11), placed in
+    # the gap between the two bars so they are readable.
+    arrow = dict(arrowstyle="-", color=INK, lw=0.9)
+    ax.annotate("11 faults landed\n(all multi-byte -> rejected)",
+                xy=(0.275, centers[("fault", 0)]), xytext=(0.47, 560),
+                fontsize=9, color=C_FAULT, va="center", ha="left",
+                arrowprops=arrow, weight="bold")
+    ax.annotate("49 resets / timeouts", xy=(0.275, centers[("reset", 0)]),
+                xytext=(0.47, 470), fontsize=9, color=C_RESET, va="center",
+                ha="left", arrowprops=arrow)
+    # Make the absence of the usable (teal) band explicit on both bars.
+    ax.annotate("0 usable single-byte faults on either route\n"
+                "(no teal band) -> no key recovered on the board",
+                xy=(1.0, volt["total"]), xytext=(0.5, 745), fontsize=9.5,
+                color=C_USABLE, va="bottom", ha="center", weight="bold",
+                arrowprops=dict(arrowstyle="->", color=C_USABLE, lw=1.1))
+    ax.annotate("", xy=(0.0, clock["total"]), xytext=(0.42, 752),
+                arrowprops=dict(arrowstyle="->", color=C_USABLE, lw=1.1))
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=11)
     ax.set_ylabel("number of trials", color=INK)
-    ax.set_ylim(0, max(clock["total"], volt["total"]) * 1.12)
+    ax.set_ylim(0, max(clock["total"], volt["total"]) * 1.25)
     ax.set_facecolor("white")
     for s in ("top", "right"):
         ax.spines[s].set_visible(False)
@@ -89,12 +111,14 @@ def main():
     ax.set_axisbelow(True)
     ax.set_title("Physical glitch campaigns on STM32F303: outcome per trial",
                  fontsize=13.5, weight="bold", color=INK)
-    ax.legend(frameon=False, fontsize=9.5, loc="upper right")
+    ax.legend(frameon=False, fontsize=9, loc="upper center",
+              bbox_to_anchor=(0.5, -0.14), ncol=4, columnspacing=1.4,
+              handletextpad=0.5)
 
     note = ("Neither route recovered the master key on the board.  Clock reached the fault zone "
             "(11 faults) but all were multi-byte\nand not single-byte exploitable;  voltage never "
             "faulted (every trial 'correct' = pulse too weak / wiring).")
-    ax.text(0.0, -0.22, note, transform=ax.transAxes, fontsize=9, color=INK, va="top")
+    ax.text(0.0, -0.30, note, transform=ax.transAxes, fontsize=9, color=INK, va="top")
 
     fig.tight_layout()
     for ext in ("png", "svg"):
