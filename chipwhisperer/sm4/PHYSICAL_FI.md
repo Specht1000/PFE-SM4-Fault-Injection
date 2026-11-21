@@ -77,6 +77,25 @@ python chipwhisperer/sm4/voltage_glitch.py --driver hp --widths 10,20,30,40 --of
 For voltage, the scope's Glitch SMA must be wired to the target's VCC-glitch path
 (not the power-measurement connection); otherwise every trial reads `correct`.
 
+### Finding the voltage fault zone (`voltage_sweep.py`)
+
+The voltage fault zone is narrow and the integer `repeat` steps are coarse, so
+tuning by hand is slow. `voltage_sweep.py` is a characterization tool (not an
+attack): it sweeps driver x repeat x width on round 31 and prints a fault map of
+how many trials were `correct` / `fault` / `no-response` per cell, then lists the
+cells that actually faulted and the exact command to recover there.
+
+~~~powershell
+python chipwhisperer/sm4/voltage_sweep.py
+python chipwhisperer/sm4/voltage_sweep.py --drivers hp --repeats 9,10 --widths 20,25,30,35,40,45
+~~~
+
+Read the map: all cells 100% `correct` even at `repeat 10` and the widest width
+usually means the Glitch SMA is not wired to VDD; a straight jump from `too weak`
+to `too strong` with no fault zone means step `--widths` more finely between those
+two widths. Once a cell faults, run `voltage_glitch.py` with that
+`--driver/--repeat/--widths/--offsets`. Output: `logs/voltage_sweep.*`.
+
 ## Outputs
 
 | Script | Log |

@@ -103,6 +103,7 @@ perturbations; the normal client above performs no fault injection.
 | client.py | Program, encrypt, decrypt, verify and optionally capture power |
 | clock_glitch.py | DFA attack entry point via clock glitch (master-key recovery) |
 | voltage_glitch.py | DFA attack entry point via voltage glitch (master-key recovery) |
+| voltage_sweep.py | Voltage characterization fault map (driver x repeat x width) to find the fault zone |
 | stuck_at_recover.py | Shared stuck-at recovery engine used by both attacks |
 | glitch_common.py | Acquisition helpers and the input-word/Giraud library models |
 | requirements.txt | Python host dependency |
