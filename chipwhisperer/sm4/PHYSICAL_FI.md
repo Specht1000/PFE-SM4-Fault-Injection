@@ -123,8 +123,12 @@ verified by re-encryption: with width ~ -7.8%, offset ~ -39.8%, round 31 yielded
 13 single-byte stuck-at faults (all four S-box bytes covered), the point was
 reused for rounds 30-28, and the solver recovered rk31..rk28 and the master key
 0123456789ABCDEFFEDCBA9876543210 (`logs/clock_glitch.txt`, `Re-encryption check:
-PASS`). The voltage route uses the same solver; whether it faults depends on
-wiring and glitch tuning, and it has not yet faulted on this board.
+PASS`). The voltage route uses the same solver; a `voltage_sweep.py`
+characterization confirmed the crowbar is correctly wired (at higher strength it
+resets the target), but the transition from "too weak" (no effect) to "too
+strong" (reset) is a knife-edge with no usable single-byte fault window at the
+available tuning, so the voltage route did not fault. The clock route is
+sufficient and is the demonstrated attack.
 
 Sources:
 

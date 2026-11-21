@@ -98,8 +98,8 @@ def main():
                 xy=(0.0, clock["trials"]), xytext=(0.0, ymax * 1.06),
                 fontsize=10, color=C_FAULT, va="bottom", ha="center", weight="bold")
 
-    # Voltage: no fault.
-    ax.annotate("no fault on any trial\n(pulse too weak / wiring)",
+    # Voltage: crowbar works (resets at higher strength) but no usable fault window.
+    ax.annotate("no usable fault\n(weak <-> reset knife-edge)",
                 xy=(1.0, volt["trials"] * 0.5), xytext=(1.0, ymax * 1.06),
                 fontsize=9.5, color=C_RESET, va="bottom", ha="center", weight="bold")
 
@@ -123,7 +123,8 @@ def main():
 
     note = ("Clock glitch (width ~ -7.8%, offset ~ -39.8%): 13 single-byte faults on round 31, reused for rounds "
             "30-28, recovered\nrk31..rk28 and the master key 0123456789ABCDEFFEDCBA9876543210 (verified). "
-            "Voltage never faulted on this board.")
+            "Voltage crowbar is wired and resets the target at higher strength, but the weak<->reset "
+            "transition\nleaves no usable single-byte fault window at the available tuning.")
     ax.text(0.0, -0.28, note, transform=ax.transAxes, fontsize=9, color=INK, va="top")
 
     fig.tight_layout()

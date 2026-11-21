@@ -79,7 +79,8 @@ readable, table-based implementation, not a hardened cryptographic library.
 Two entry points recover the full SM4 master key from physical glitch faults
 (instruction-skip / stuck-at model), verified by re-encryption. On this board the
 clock route recovered the key (`Re-encryption check: PASS`); the voltage route
-uses the same solver but has not yet faulted (see PHYSICAL_FI.md):
+uses the same solver, but its crowbar fault zone is a knife-edge (resets the
+target with no usable fault window; see PHYSICAL_FI.md):
 
 ~~~powershell
 python chipwhisperer/sm4/clock_glitch.py                 # DFA via clock glitch

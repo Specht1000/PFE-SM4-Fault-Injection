@@ -200,9 +200,13 @@ the clean ciphertext} \hex{681EDF34D206965E86B3E94F536E4246}. This is a full,
 verified physical key recovery, not a simulation (Figure~\ref{fig:results_compare}).
 Over the whole campaign ($270$ trials) $82$ were correct, $110$ gave no response
 (pulse too strong) and $78$ faulted. The \emph{voltage} route runs the same
-solver but, with the available wiring and tuning, faulted on none of its trials
-(every attempt returned the correct ciphertext); the clock route is sufficient
-for the attack.
+solver. A driver\,$\times$\,repeat\,$\times$\,width characterization with
+\texttt{voltage\_sweep.py} confirmed that the crowbar is correctly wired --- at
+higher strength it resets the target --- but the transition from ``no effect''
+(too weak) to ``reset'' (too strong) is a knife-edge: it leaves no usable
+single-byte fault window at the available tuning granularity, so no faulty
+ciphertext was obtained on the voltage route. The clock route alone recovers the
+master key and is sufficient for the attack.
 
 \begin{figure}[htbp]
 \centering
