@@ -118,7 +118,7 @@ def figure_pruning(trials=400, max_faults=6, seed=7):
     xs = np.arange(max_faults + 1)
     ax.plot(xs, curve, "-o", color=C_CLOCK, lw=2.2, ms=7, label="Piret DFA (known-mask), mean survivors")
     ax.axhline(1, color=C_ACC, lw=1.6, ls="--")
-    ax.plot([1], [1], "D", color=C_ACC, ms=9, label="Stuck-at (our board): 1 clean fault pins the byte")
+    ax.plot([1], [1], "D", color=C_ACC, ms=9, label="Stuck-at model: 1 clean fault pins the byte")
     _style(ax)
     ax.set_yscale("log")
     ax.set_xlabel("number of single-byte faults on one key byte")

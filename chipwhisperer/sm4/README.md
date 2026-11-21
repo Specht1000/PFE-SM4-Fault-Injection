@@ -76,8 +76,10 @@ readable, table-based implementation, not a hardened cryptographic library.
 
 ## Physical DFA attacks on the chip
 
-Two entry points recover the full SM4 master key from physical glitch faults
-(instruction-skip / stuck-at model), verified by re-encryption:
+Two entry points run a DFA against physical glitch faults (instruction-skip /
+stuck-at model), recovering and re-encryption-verifying the master key whenever a
+clean single-byte fault is obtained. On this board neither route has reached that
+point yet (see PHYSICAL_FI.md); the DFA is validated in the Python simulation:
 
 ~~~powershell
 python chipwhisperer/sm4/clock_glitch.py                 # DFA via clock glitch

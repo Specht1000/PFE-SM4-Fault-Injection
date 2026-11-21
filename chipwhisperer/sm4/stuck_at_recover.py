@@ -7,8 +7,11 @@ is directly exploitable: a clean stuck-at fault on one byte pins that key byte.
 This tool glitches rounds 31, 30, 29 and 28 in turn, collects every faulty
 ciphertext (no peeling needed during collection), then runs the stuck-at solver
 (piret_sm4.recover_stuck_at), which searches the small per-byte candidate sets
-and returns the master key verified by re-encryption. Both common stuck values
-(0x00 and 0xFF) are tried, so the campaign need not know which one occurred.
+and returns the master key verified by re-encryption -- when clean single-byte
+faults are available. Both common stuck values (0x00 and 0xFF) are tried, so the
+campaign need not know which one occurred. (On the project's board neither the
+clock nor the voltage route yielded a clean single-byte fault; the solver itself
+is validated in the Python simulation.)
 
 The default glitch shape follows NewAE's known-good CW-Lite ARM (STM32) values
 from the fault201 DFA lab (width ~ -9, offset ~ -40, repeat 3); these are the

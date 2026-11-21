@@ -2,7 +2,7 @@
 \label{chap:physical_fi}
 \section{Platform and tested baseline}
 The CW1173 Lite ARM capture device supplies the STM32F303 target clock and communicates through SimpleSerial 1.1 at 38400 baud. The project's firmware performs normal SM4 encryption and decryption. A selectable GPIO trigger marks the whole block or one processing round, and key expansion and serial transmission remain outside the marked operation.
-The target firmware has been programmed over USB and its official encryption/decryption vector verified on the connected board. The clock-glitch attack described below has been executed on the board and recovered the full SM4 master key, verified by re-encryption (Section~\ref{sec:stuck_at_result}).
+The target firmware has been programmed over USB and its official encryption/decryption vector verified on the connected board. The clock-glitch attack described below has been executed on the board; it reached the fault zone but, with the available tuning, produced only multi-byte faults, so it did not recover the master key on the hardware (Section~\ref{sec:stuck_at_result}). The stuck-at DFA itself is validated end-to-end in the Python simulation, which recovers and re-encryption-verifies the full key.
 \section{Two separate attack entry points}
 \begin{center}\begin{tabular}{P{.25\linewidth}P{.32\linewidth}P{.32\linewidth}}\toprule
  & Clock glitching & Voltage glitching\\\midrule
@@ -13,13 +13,13 @@ Glitch output & \texttt{clock\_xor} & \texttt{glitch\_only}\\
 Crowbar & Both disabled & Exactly one of LP or HP enabled\\
 Possible results & Correct result, corrupted computation, invalid response or no response & Correct result, corrupted computation, invalid response or no response\\\bottomrule
 \end{tabular}\end{center}
-Both files are under \texttt{chipwhisperer/sm4/} and are the two DFA attack entry points. They share the same stuck-at recovery engine \texttt{stuck\_at\_recover.py}, so a usable fault from either route recovers the full master key identically. On the project's board only the clock route actually produced exploitable faults and recovered the key (Section~\ref{sec:stuck_at_result}); the voltage route runs the same solver but, with the available wiring and tuning, did not land a usable fault. Acquisition helpers and the simulation-only input-word/Giraud models live in \texttt{glitch\_common.py}. No synthetic XOR is inserted.
+Both files are under \texttt{chipwhisperer/sm4/} and are the two DFA attack entry points. They share the same stuck-at recovery engine \texttt{stuck\_at\_recover.py}, so a clean single-byte fault from either route would recover the full master key identically. On the project's board neither route reached that point (Section~\ref{sec:stuck_at_result}): the clock route landed only multi-byte faults and the voltage route did not fault at all, so the physical key recovery is shown here through the Python simulation while the hardware campaigns document the fault landscape. Acquisition helpers and the simulation-only input-word/Giraud models live in \texttt{glitch\_common.py}. No synthetic XOR is inserted.
 \section{Clock glitching}
 The target uses the clock supplied by the scope. The FPGA's glitch block perturbs that forwarded signal around a trigger-relative position. The result depends on the actual instruction stream, timing margins and pulse shape; it is not equivalent to commanding a chosen data-bit flip.
 \begin{lightcode}
 python chipwhisperer/sm4/clock_glitch.py
 \end{lightcode}
-With the board connected this performs the whole attack: it glitches rounds 31 through 28, collects the faulty ciphertexts and recovers the master key. The glitch defaults to the NewAE CW-Lite ARM regime; \texttt{--widths}, \texttt{--offsets}, \texttt{--delays} and \texttt{--repeat} tune it.
+With the board connected this performs the whole attack: it glitches rounds 31 through 28, collects the faulty ciphertexts and runs the stuck-at solver, recovering the master key whenever clean single-byte faults are obtained. The glitch defaults to the NewAE CW-Lite ARM regime; \texttt{--widths}, \texttt{--offsets}, \texttt{--delays} and \texttt{--repeat} tune it.
 
 \begin{figure}[H]\centering
 \resizebox{.95\linewidth}{!}{%
@@ -143,7 +143,7 @@ Each entry point writes its own colour-coded log, \texttt{logs/clock\_glitch.*} 
 legible), a per-round status summary, a per-byte coverage line and a step-by-step
 recovery derivation.
 
-\section{Instruction-skip (stuck-at) recovery: the achieved result}
+\section{Instruction-skip (stuck-at) recovery: fault model and outcome}
 \label{sec:stuck_at_result}
 On the project's CW1173-Lite / STM32F303 target the clock glitch did not produce
 clean single-\emph{bit} flips. Instead it produced \textbf{instruction-skip
@@ -185,17 +185,35 @@ python chipwhisperer/sm4/clock_glitch.py
 python chipwhisperer/sm4/voltage_glitch.py --driver lp
 \end{lightcode}
 
-\paragraph{Measured outcome.}
-Using the NewAE CW-Lite ARM clock-glitch regime (negative pulse width
-$\approx-8\%$, offset $\approx-40\%$, \texttt{repeat}~3), all four bytes of round
-31 were faulted (observed stuck values \hex{00} and \hex{FF}), the useful delays
-were reused for rounds 30, 29 and 28, and the solver recovered the four tail
-subkeys. The SM4 master key \hex{0123456789ABCDEFFEDCBA9876543210} was recovered
-from the physical faulty ciphertexts and \textbf{verified by re-encryption
-against the clean ciphertext} \hex{681EDF34D206965E86B3E94F536E4246}. This is a
-full, verified physical key recovery, not a simulation. The same stuck-at
-pipeline accepts voltage-glitch faults; the glitch route only changes how the
-stuck-at fault is produced, not how it is solved.
+\paragraph{Measured outcome on the board.}
+Both routes were run for $656$ trials each (Figure~\ref{fig:results_compare}).
+The \emph{clock} route, using the NewAE CW-Lite ARM regime (negative pulse width
+$\approx-8\%$, offset $\approx-40\%$, \texttt{repeat}~3), reached the fault zone:
+$49$ trials reset the target (pulse too strong) and $11$ produced a faulty
+ciphertext. However, every landed fault was \emph{multi-byte} --- its $L^{-1}$
+difference spread over several bytes (e.g.\ $\hex{9EDDC868\ldots}$) rather than
+one, so the solver correctly rejected it as not single-byte exploitable. The
+\emph{voltage} route faulted on none of its $656$ trials: every attempt returned
+the correct ciphertext, i.e.\ the crowbar pulse (or its wiring to the
+VCC-glitch path) was too weak to disturb the computation. Consequently
+\textbf{neither physical route recovered the master key on this board}. The
+stuck-at DFA is nonetheless validated end to end in the Python simulation, which
+injects a clean single-byte stuck-at fault, recovers the four tail subkeys and
+the SM4 master key \hex{0123456789ABCDEFFEDCBA9876543210}, and verifies it by
+re-encryption against \hex{681EDF34D206965E86B3E94F536E4246}. The clock route is
+the closer of the two --- it bracketed the fault zone with both faults and
+resets --- and the barrier is purely glitch tuning: a narrower pulse that
+isolates a single S-box byte would make the same solver succeed.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.86\textwidth]{figures/fig_results_compare.png}
+\caption{Per-trial outcome of the two physical glitch campaigns ($656$ trials
+each). The clock route reaches the fault zone (faults and resets) but all faults
+are multi-byte; the voltage route never faults. Neither recovered the master key
+on the board.}
+\label{fig:results_compare}
+\end{figure}
 \section{Fault landscape and DFA efficiency}
 \label{sec:fault_landscape}
 Figure~\ref{fig:sbox_ddt} is the SM4 S-box difference distribution table: every
