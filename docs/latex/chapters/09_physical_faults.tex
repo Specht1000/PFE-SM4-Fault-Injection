@@ -13,7 +13,7 @@ Glitch output & \texttt{clock\_xor} & \texttt{glitch\_only}\\
 Crowbar & Both disabled & Exactly one of LP or HP enabled\\
 Possible results & Correct result, corrupted computation, invalid response or no response & Correct result, corrupted computation, invalid response or no response\\\bottomrule
 \end{tabular}\end{center}
-Both files are under \texttt{chipwhisperer/sm4/} and are the two DFA attack entry points: each recovers the full master key through its glitch route. They share the stuck-at recovery engine \texttt{stuck\_at\_recover.py}; acquisition helpers and the simulation-only input-word/Giraud models live in \texttt{glitch\_common.py}. No synthetic XOR is inserted.
+Both files are under \texttt{chipwhisperer/sm4/} and are the two DFA attack entry points. They share the same stuck-at recovery engine \texttt{stuck\_at\_recover.py}, so a usable fault from either route recovers the full master key identically. On the project's board only the clock route actually produced exploitable faults and recovered the key (Section~\ref{sec:stuck_at_result}); the voltage route runs the same solver but, with the available wiring and tuning, did not land a usable fault. Acquisition helpers and the simulation-only input-word/Giraud models live in \texttt{glitch\_common.py}. No synthetic XOR is inserted.
 \section{Clock glitching}
 The target uses the clock supplied by the scope. The FPGA's glitch block perturbs that forwarded signal around a trigger-relative position. The result depends on the actual instruction stream, timing margins and pulse shape; it is not equivalent to commanding a chosen data-bit flip.
 \begin{lightcode}
