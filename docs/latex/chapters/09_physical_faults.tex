@@ -208,6 +208,30 @@ single-byte fault window at the available tuning granularity, so no faulty
 ciphertext was obtained on the voltage route. The clock route alone recovers the
 master key and is sufficient for the attack.
 
+\paragraph{Why the voltage route does not fault here.}
+A usable fault requires collapsing the supply just enough to corrupt one data
+operation (an S-box store) \emph{without} crashing the core; too small a dip does
+nothing, and too large a dip resets the whole CPU by corrupting control flow
+rather than a single byte. On this target that margin is extremely narrow, and
+three factors keep the available tuning from landing inside it. First, the
+crowbar strength is set by \texttt{width} (a percentage of the clock period) and
+an \emph{integer} \texttt{repeat} (1--10): the steps are coarse, and at
+\texttt{repeat}~10 a single width unit ($30\to31$) already jumps the output from
+``no effect'' straight to ``reset'', so the useful energy falls \emph{between}
+two quantised settings. Second, the crowbar is a blunt instrument --- it perturbs
+the whole chip supply at once, unlike the clock glitch, which violates the setup
+time of one specific logic path at a precise phase and therefore has a wide,
+targeted fault window. Third, the board's decoupling capacitors and the STM32's
+internal regulator smooth the supply, widening the gap between ``absorbed'' and
+``catastrophic''. This matches the literature: Zhang et al.\ obtain reliable
+voltage faults on a comparable SM4 chip only by \emph{coupling} the voltage
+glitch with clock and \emph{elevated temperature}, which lowers the fault
+threshold; at room temperature with voltage alone the window is narrower still.
+The result is therefore not that voltage DFA is impossible on SM4, but that on
+this bench, at ambient temperature and with the crowbar's quantised controls, the
+usable fault window lies between the reachable settings --- whereas the finer,
+more surgical clock glitch lands in it readily.
+
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.86\textwidth]{figures/fig_results_compare.png}
